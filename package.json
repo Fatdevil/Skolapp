@@ -1,0 +1,19 @@
+{
+  "name": "skolapp-dropin-agents",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"(lägg till build-kommandon)\"",
+    "lint": "echo \"(lägg till eslint)\" && exit 0",
+    "typecheck": "echo \"(lägg till tsc --noEmit)\" && exit 0",
+    "test": "playwright test",
+    "test:ui": "playwright test tests/ui-report.spec.ts",
+    "prepare": "playwright install --with-deps"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.2",
+    "pptxgenjs": "^3.12.0",
+    "typescript": "^5.5.4"
+  }
+}

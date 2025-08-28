@@ -1,0 +1,4 @@
+*       @owner
+/docs/* @docs-team
+/apps/* @frontend-team
+/api/*  @backend-team
