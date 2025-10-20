@@ -23,8 +23,6 @@ const mockUseAuth = AuthContext.useAuth as jest.MockedFunction<typeof AuthContex
 const mockPromoteUser = promoteUser as jest.MockedFunction<typeof promoteUser>;
 const mockUploadInvites = uploadInvites as jest.MockedFunction<typeof uploadInvites>;
 
-const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
-
 function renderScreen() {
   return render(
     <ToastProvider>
@@ -64,11 +62,9 @@ describe('AdminScreen', () => {
     });
     await act(async () => {
       fireEvent.press(screen.getByTestId('role-admin'));
-      await flushPromises();
     });
     await act(async () => {
       fireEvent.press(screen.getByText('Uppgradera'));
-      await flushPromises();
     });
 
     await waitFor(() => {
@@ -85,12 +81,12 @@ describe('AdminScreen', () => {
 
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('namn@example.com'), 'guardian@example.com');
+    });
+    await act(async () => {
       fireEvent.press(screen.getByTestId('role-teacher'));
-      await flushPromises();
     });
     await act(async () => {
       fireEvent.press(screen.getByText('Uppgradera'));
-      await flushPromises();
     });
 
     expect(screen.getByText(/Endast admins kan ändra roller/)).toBeTruthy();
