@@ -1,8 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AdminScreen from '../src/screens/admin/AdminScreen';
-import { ToastProvider } from '../src/components/ToastProvider';
 import * as AuthContext from '../src/auth/AuthContext';
+import * as ToastModule from '../src/components/ToastProvider';
 import { promoteUser, uploadInvites, type UserRole } from '../src/services/api';
 
 jest.mock('../src/auth/AuthContext', () => ({
@@ -22,13 +22,16 @@ jest.mock('../src/services/api', () => {
 const mockUseAuth = AuthContext.useAuth as jest.MockedFunction<typeof AuthContext.useAuth>;
 const mockPromoteUser = promoteUser as jest.MockedFunction<typeof promoteUser>;
 const mockUploadInvites = uploadInvites as jest.MockedFunction<typeof uploadInvites>;
+const mockToast = {
+  show: jest.fn(),
+  hide: jest.fn()
+};
+const useToastSpy = jest
+  .spyOn(ToastModule, 'useToast')
+  .mockReturnValue(mockToast as unknown as ReturnType<typeof ToastModule.useToast>);
 
 function renderScreen() {
-  return render(
-    <ToastProvider>
-      <AdminScreen />
-    </ToastProvider>
-  );
+  return render(<AdminScreen />);
 }
 
 function buildAuthUser(role: UserRole) {
@@ -51,6 +54,9 @@ beforeEach(() => {
     user: { id: 'u2', email: 'teacher@example.com', role: 'admin' }
   } as any);
   mockUploadInvites.mockResolvedValue({ ok: true, count: 3 } as any);
+  mockToast.show.mockReset();
+  mockToast.hide.mockReset();
+  useToastSpy.mockReturnValue(mockToast as unknown as ReturnType<typeof ToastModule.useToast>);
 });
 
 describe('AdminScreen', () => {
@@ -70,7 +76,9 @@ describe('AdminScreen', () => {
     await waitFor(() => {
       expect(mockPromoteUser).toHaveBeenCalledWith({ email: 'teacher@example.com', role: 'admin' });
     });
-    expect(await screen.findByText('teacher@example.com uppgraderades till admin')).toBeTruthy();
+    await waitFor(() => {
+      expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
+    });
   });
 
   test('teachers see warning and forbidden promote shows error toast', async () => {
@@ -92,7 +100,7 @@ describe('AdminScreen', () => {
     expect(screen.getByText(/Endast admins kan ändra roller/)).toBeTruthy();
     expect(mockPromoteUser).not.toHaveBeenCalled();
     await waitFor(() => {
-      expect(screen.getByText('Du saknar behörighet')).toBeTruthy();
+      expect(mockToast.show).toHaveBeenCalledWith('Du saknar behörighet');
     });
   });
 
