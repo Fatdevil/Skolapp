@@ -48,11 +48,13 @@ function buildAuthUser(role: UserRole) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUseAuth.mockReturnValue(buildAuthUser('admin'));
-  mockPromoteUser.mockResolvedValue({
-    ok: true,
-    updated: true,
-    user: { id: 'u2', email: 'teacher@example.com', role: 'admin' }
-  } as any);
+  mockPromoteUser.mockImplementation(async () => {
+    return {
+      ok: true,
+      updated: true,
+      user: { id: 'u2', email: 'teacher@example.com', role: 'admin' }
+    } as any;
+  });
   mockUploadInvites.mockResolvedValue({ ok: true, count: 3 } as any);
   mockToast.show.mockReset();
   mockToast.hide.mockReset();
@@ -74,8 +76,9 @@ describe('AdminScreen', () => {
     });
 
     await waitFor(() => {
-      expect(mockPromoteUser).toHaveBeenCalledWith({ email: 'teacher@example.com', role: 'admin' });
+      expect(mockPromoteUser).toHaveBeenCalled();
     });
+    expect(mockPromoteUser).toHaveBeenCalledWith({ email: 'teacher@example.com', role: 'admin' });
     await waitFor(() => {
       expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
     });
