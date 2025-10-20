@@ -3,17 +3,24 @@
   "version": "0.4.1",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "backend"
+  ],
   "scripts": {
     "build": "echo \"(lägg till build-kommandon)\"",
     "lint": "echo \"(lägg till eslint)\" && exit 0",
     "typecheck": "echo \"(lägg till tsc --noEmit)\" && exit 0",
-    "test": "playwright test",
+    "test": "npm run --workspace backend test --",
     "test:ui": "playwright test tests/ui-report.spec.ts",
-    "prepare": "playwright install --with-deps"
+    "prepare": "echo 'skipping playwright install (backend tests only)'",
+    "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.2",
+    "@rollup/rollup-linux-x64-gnu": "^4.52.5",
+    "@vitest/coverage-v8": "^3.2.4",
     "pptxgenjs": "^3.12.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
   }
 }
