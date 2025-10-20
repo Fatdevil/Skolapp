@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getSupabase } from '../db/supabase.js';
+import type { Role } from '../util/roles.js';
 
-export type Role = 'guardian' | 'teacher' | 'admin';
+export type { Role } from '../util/roles.js';
 
 const SESSION_COOKIE_NAME = 'sid';
 const COOKIE_OPTIONS = {

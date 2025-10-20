@@ -27,6 +27,7 @@ jest.mock('../src/services/api', () => {
     sendMessage: jest.fn(),
     registerDevice: jest.fn(),
     uploadInvites: jest.fn(),
+    promoteUser: jest.fn(),
     sendTestPush: jest.fn()
   };
 });
