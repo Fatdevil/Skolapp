@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { closeTestApp, createTestApp } from '../test/helpers/app';
+
+const BASE_TIME = new Date('2025-01-01T12:00:00Z');
 
 type Invitation = {
   id: string;
@@ -10,9 +13,6 @@ type Invitation = {
   expires_at: string | null;
   used_at: string | null;
 };
-
-process.env.NODE_ENV = 'test';
-process.env.PILOT_RETURN_TOKEN = 'true';
 
 const mockEnsureDefaultClass = vi.fn(async () => ({ id: 'class-1', name: 'Klass 3A', code: '3A' }));
 const mockGetClassByCode = vi.fn(async (code: string) => (code === '3A' ? { id: 'class-1', name: 'Klass 3A', code: '3A' } : null));
@@ -40,11 +40,11 @@ const mockMarkInvitationUsed = vi.fn(async (token: string) => {
 });
 
 const users = new Map<string, { id: string; email: string; role: 'guardian' | 'teacher' | 'admin' }>();
-const mockUpsertUserByEmail = vi.fn(async (email: string) => {
+const mockUpsertUserByEmail = vi.fn(async (email: string, role: 'guardian' | 'teacher' | 'admin' = 'guardian') => {
   if (users.has(email)) {
     return users.get(email)!;
   }
-  const user = { id: `user-${Buffer.from(email).toString('hex').slice(0, 8)}`, email, role: 'guardian' as const };
+  const user = { id: `user-${Buffer.from(email).toString('hex').slice(0, 8)}`, email, role };
   users.set(email, user);
   return user;
 });
@@ -69,15 +69,15 @@ vi.mock('../src/util/remindersSupabase.js', () => ({
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  const mod = await import('../src/index.js');
-  app = mod.app;
+  app = await createTestApp();
 });
 
 afterAll(async () => {
-  await app.close();
+  await closeTestApp();
 });
 
 beforeEach(() => {
+  vi.setSystemTime(BASE_TIME);
   invitations.length = 0;
   mockCreateInvitation.mockClear();
   mockGetInvitationByToken.mockClear();
@@ -128,25 +128,34 @@ describe('magic link pilot flow', () => {
     expect(invitations[0].used_at).not.toBeNull();
   });
 
-  test('rejects reused or expired tokens', async () => {
+  test('rejects expired tokens after TTL passes', async () => {
     const initiateResponse = await app.inject({
       method: 'POST',
       url: '/auth/magic/initiate',
-      payload: { email: 'reuse@example.com', classCode: '3A' }
+      payload: { email: 'ttl@example.com', classCode: '3A' }
     });
-    const token = (initiateResponse.json() as any).token as string;
-    const invitation = invitations[0];
-    invitation.expires_at = new Date(Date.now() - 60_000).toISOString();
+    const token = (initiateResponse.json() as { token: string }).token;
+
+    vi.setSystemTime(new Date(BASE_TIME.getTime() + 16 * 60 * 1000));
+
     const expiredResponse = await app.inject({
       method: 'POST',
       url: '/auth/magic/verify',
       payload: { token }
     });
+
     expect(expiredResponse.statusCode).toBe(400);
     expect(expiredResponse.json()).toEqual({ error: 'Token har gått ut' });
+  });
 
-    invitation.expires_at = new Date(Date.now() + 60_000).toISOString();
-    invitation.used_at = null;
+  test('rejects tokens that have already been used', async () => {
+    const initiateResponse = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/initiate',
+      payload: { email: 'reuse@example.com', classCode: '3A' }
+    });
+    const token = (initiateResponse.json() as { token: string }).token;
+
     const firstVerify = await app.inject({
       method: 'POST',
       url: '/auth/magic/verify',
@@ -159,6 +168,7 @@ describe('magic link pilot flow', () => {
       url: '/auth/magic/verify',
       payload: { token }
     });
+
     expect(reusedResponse.statusCode).toBe(400);
     expect(reusedResponse.json()).toEqual({ error: 'Token har redan använts' });
   });
