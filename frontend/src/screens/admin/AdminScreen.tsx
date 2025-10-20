@@ -1,7 +1,10 @@
 import React,{useState} from 'react';
 import {View,Text,StyleSheet,TextInput,TouchableOpacity,ScrollView} from 'react-native';
 import { uploadInvites, sendTestPush } from '../../services/api';
+import { useToast } from '../../components/ToastProvider';
+
 export default function AdminScreen(){
+  const toast = useToast();
   const [csv,setCsv]=useState('email,classCode\nanna@example.com,3A\n');
   const [preview,setPreview]=useState<string[][]>([]);
   const [validated,setValidated]=useState(false);
@@ -14,10 +17,30 @@ export default function AdminScreen(){
     }catch{ setPreview([['Fel vid parsning']]); setValidated(false); }
   };
   const onUpload=async()=>{
-    if(!validated){ alert('CSV saknar korrekta kolumnnamn (email,classCode)'); return; }
-    const res=await uploadInvites(csv); alert(`Skickade ${res.count} inbjudningar (se backend-logg/SMTP).`);
+    if(!validated){ toast.show('CSV saknar korrekta kolumnnamn (email,classCode)'); return; }
+    try {
+      const res=await uploadInvites(csv);
+      toast.show(`Skickade ${res.count} inbjudningar`);
+    } catch (error: any) {
+      if (error?.response?.status === 403) {
+        toast.show('Du saknar behörighet');
+      } else {
+        toast.show('Kunde inte skicka inbjudningar');
+      }
+    }
   };
-  const onTestPush=async()=>{ await sendTestPush({ classId:'class-1', title:'Testnotis', body:'Detta är en testnotis.'}); alert('Testnotis skickad'); };
+  const onTestPush=async()=>{
+    try {
+      await sendTestPush({ classId:'class-1', title:'Testnotis', body:'Detta är en testnotis.'});
+      toast.show('Testnotis skickad');
+    } catch (error: any) {
+      if (error?.response?.status === 403) {
+        toast.show('Du saknar behörighet');
+      } else {
+        toast.show('Kunde inte skicka testnotis');
+      }
+    }
+  };
   return(<ScrollView style={styles.c} contentContainerStyle={{padding:16}}>
     <Text style={styles.t}>Admin</Text>
     <Text style={styles.l}>CSV (email,classCode)</Text>

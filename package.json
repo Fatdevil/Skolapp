@@ -10,10 +10,11 @@
     "build": "echo \"(lägg till build-kommandon)\"",
     "lint": "echo \"(lägg till eslint)\" && exit 0",
     "typecheck": "echo \"(lägg till tsc --noEmit)\" && exit 0",
-    "test": "npm run --workspace backend test --",
+    "test": "npm run --workspace backend test -- && npm run frontend:test",
+    "frontend:test": "npm test --prefix frontend",
     "test:ui": "playwright test tests/ui-report.spec.ts",
     "prepare": "echo 'skipping playwright install (backend tests only)'",
-    "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress"
+    "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress && npm install --prefix frontend --no-fund --no-audit --no-progress"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.2",
