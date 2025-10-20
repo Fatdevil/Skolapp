@@ -58,7 +58,8 @@ await app.register(cors, {
     if (!origin) return cb(null, true);
     const allowed = allowedCorsOrigins.includes(origin);
     cb(null, allowed);
-  }
+  },
+  credentials: true
 });
 await app.register(rateLimit, {
   max: 20,
@@ -115,6 +116,14 @@ app.post('/auth/magic/verify', async (req, reply) => {
   await markInvitationUsed(token);
   const user = await upsertUserByEmail(inv.email, 'guardian');
   await createSession(reply, user.id);
+  return { user: { id: user.id, email: user.email, role: user.role } };
+});
+
+app.get('/auth/whoami', async (req, reply) => {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return reply.code(401).send({ error: 'Unauthenticated' });
+  }
   return { user: { id: user.id, email: user.email, role: user.role } };
 });
 

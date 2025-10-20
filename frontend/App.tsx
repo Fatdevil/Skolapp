@@ -1,13 +1,18 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { ActivityIndicator, View, Text, StyleSheet } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { registerDevice } from './src/services/api';
 import LoginScreen from './src/screens/LoginScreen';
 import Tabs from './src/screens/Tabs';
+import { AuthProvider, useAuth } from './src/auth/AuthContext';
+import { ToastProvider } from './src/components/ToastProvider';
+
 const Stack = createNativeStackNavigator();
-async function registerForPush(){
+
+async function registerForPush() {
   let token = '';
   if (Device.isDevice) {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -18,19 +23,67 @@ async function registerForPush(){
     }
     if (finalStatus !== 'granted') return;
     const pushToken = await Notifications.getExpoPushTokenAsync();
-    // @ts-ignore
+    // @ts-ignore expo sdk typing quirk
     token = pushToken.data || pushToken;
   }
-  if (token) { try { await registerDevice({ expoPushToken: token, classId: 'class-1' }); } catch {} }
+  if (token) {
+    try {
+      await registerDevice({ expoPushToken: token, classId: 'class-1' });
+    } catch (error) {
+      console.warn('Could not register push token', error);
+    }
+  }
 }
-export default function App(){
-  useEffect(()=>{ registerForPush(); },[]);
+
+function RootNavigator() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color="#3b82f6" />
+        <Text style={styles.loadingText}>Laddar...</Text>
+      </View>
+    );
+  }
+
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown:false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {user ? (
         <Stack.Screen name="Tabs" component={Tabs} />
-      </Stack.Navigator>
-    </NavigationContainer>
+      ) : (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      )}
+    </Stack.Navigator>
   );
 }
+
+export default function App() {
+  useEffect(() => {
+    registerForPush();
+  }, []);
+
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <NavigationContainer>
+          <RootNavigator />
+        </NavigationContainer>
+      </AuthProvider>
+    </ToastProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    backgroundColor: '#0b1220',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  loadingText: {
+    color: 'white',
+    marginTop: 12,
+    fontWeight: '600'
+  }
+});

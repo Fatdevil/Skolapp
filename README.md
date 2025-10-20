@@ -18,15 +18,23 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
 - `SESSION_TTL_DAYS` – antal dagar en session är giltig innan ny inloggning krävs (default `30`).
 - `CORS_ORIGINS` – kommaseparerad lista med tillåtna ursprung (standard: `http://localhost:19006,http://localhost:3000`).
 - `PILOT_RETURN_TOKEN` – sätt till `true` i lokal utveckling om du vill få tillbaka engångstoken i svaret från `/auth/magic/initiate`.
+- `GET /auth/whoami` – returnerar aktuell användare baserat på cookie (401 annars).
+- `POST /auth/logout` – revokerar sessionen och rensar cookien.
+
+### Frontend-konfiguration
+- `EXPO_PUBLIC_API_URL` – bas-URL för API:t, se `frontend/.env.example`.
+- Axios är förkonfigurerat med `withCredentials=true`; backend måste tillåta CORS med credentials.
 
 ### Köra auth-flödet lokalt
 1. Kopiera `backend/.env.example` till `backend/.env` och fyll i minst `SUPABASE_*`, `SESSION_SECRET` och önskad `CORS_ORIGINS`.
 2. (Valfritt) Sätt `PILOT_RETURN_TOKEN=true` för att få tillbaka magiska token direkt i API-svaret under utveckling.
 3. Starta backend: `npm run --workspace backend dev`.
-4. Initiera inloggning: `POST /auth/magic/initiate` med `{ "email": "du@example.com", "classCode": "3A" }`.
-5. Verifiera token: `POST /auth/magic/verify` med token → svaret innehåller användaren och sätter en `sid`-cookie.
-6. Anropa skyddade endpoints (t.ex. `POST /admin/test-push`) med cookien – endast roller från databasen (`guardian/teacher/admin`) släpps igenom.
-7. Logga ut genom `POST /auth/logout` för att rensa sessionen och cookien.
+4. Starta frontend: `cd frontend && npm start` (Expo kör appen).
+5. Initiera inloggning: `POST /auth/magic/initiate` med `{ "email": "du@example.com", "classCode": "3A" }` eller använd inloggningsskärmen.
+6. Verifiera token: `POST /auth/magic/verify` med token → svaret innehåller användaren och sätter en `sid`-cookie.
+7. AuthContext i appen hämtar `GET /auth/whoami` och visar tabs om sessionen är giltig.
+8. Anropa skyddade endpoints (t.ex. `POST /admin/test-push`) med cookien – endast roller från databasen (`guardian/teacher/admin`) släpps igenom.
+9. Logga ut genom `POST /auth/logout` eller logout-knappen i appen för att rensa sessionen och cookien.
 
 ## Mappar
 - `.github/workflows/` – agenter (CI, Security, Triage, Release, UI Test)  

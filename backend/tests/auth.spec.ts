@@ -317,6 +317,29 @@ describe('server-side RBAC sessions', () => {
     expect(response.statusCode).toBe(200);
   });
 
+  test('whoami returns 401 when session is missing', async () => {
+    const response = await app.inject({ method: 'GET', url: '/auth/whoami' });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: 'Unauthenticated' });
+  });
+
+  test('whoami returns current session user', async () => {
+    const { sid, user } = await loginAs('guardian@example.com', 'guardian');
+    const response = await app.inject({
+      method: 'GET',
+      url: '/auth/whoami',
+      headers: { cookie: `sid=${sid}` }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role
+      }
+    });
+  });
+
   test('logout revokes session cookie', async () => {
     const { sid } = await loginAs('logout@example.com', 'admin');
     const logoutResponse = await app.inject({
@@ -327,6 +350,11 @@ describe('server-side RBAC sessions', () => {
     expect(logoutResponse.statusCode).toBe(200);
     expect(logoutResponse.json()).toEqual({ ok: true });
     expect(sessions.find((row) => row.id === sid)?.revoked).toBe(true);
+    const clearCookie = logoutResponse.headers['set-cookie'];
+    expect(clearCookie).toBeTruthy();
+    const header = Array.isArray(clearCookie) ? clearCookie[0]! : clearCookie!;
+    expect(header).toContain('sid=');
+    expect(header).toContain('Path=/');
 
     const blocked = await app.inject({
       method: 'POST',
@@ -335,6 +363,13 @@ describe('server-side RBAC sessions', () => {
       payload: { }
     });
     expect(blocked.statusCode).toBe(403);
+
+    const whoamiAfter = await app.inject({
+      method: 'GET',
+      url: '/auth/whoami',
+      headers: { cookie: `sid=${sid}` }
+    });
+    expect(whoamiAfter.statusCode).toBe(401);
   });
 
   test('session expires after TTL days', async () => {
