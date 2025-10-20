@@ -4,9 +4,11 @@ import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
+import cookie from '@fastify/cookie';
 import { z } from 'zod';
 import dotenv from 'dotenv'; dotenv.config();
 import { EmailMagicAuth } from './auth/EmailMagicAuth.js';
+import { createSession, destroySession, getUserFromRequest, requireRole } from './auth/session.js';
 import { BankIdAuth } from './auth/BankIdAuth.js';
 import { getEmailProvider } from './services/EmailService.js';
 import { sendPush } from './services/PushService.js';
@@ -20,8 +22,29 @@ import { startReminderWorkerSupabase, getRemindersHealth } from './util/reminder
 import { moderate } from './util/moderation.js';
 
 const app = Fastify({ logger: true });
+
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) {
+  throw new Error('SESSION_SECRET must be configured');
+}
+
+await app.register(cookie, {
+  secret: sessionSecret,
+  hook: 'onRequest'
+});
+
 app.addHook('onRequest', async (req) => {
-  req.log.info({ id: req.id, path: req.url, method: req.method, role: 'guardian' }, 'incoming');
+  const user = await getUserFromRequest(req);
+  req.log.info(
+    {
+      id: req.id,
+      path: req.url,
+      method: req.method,
+      userId: user?.id ?? null,
+      role: user?.role ?? 'anonymous'
+    },
+    'incoming'
+  );
 });
 
 const defaultCorsOrigins = ['http://localhost:19006', 'http://localhost:3000'];
@@ -52,20 +75,6 @@ app.get('/auth/capabilities', async () => ({ bankid: bankidEnabled, magic: true 
 // Seed default class + start reminders
 await ensureDefaultClass();
 startReminderWorkerSupabase();
-
-// ---- RBAC helpers ----
-type Role = 'guardian' | 'teacher' | 'admin';
-function getRoleFromRequest(): Role {
-  return 'guardian';
-}
-function requireRole(req: any, reply: any, allowed: Role[]) {
-  const role = getRoleFromRequest(req);
-  if (!allowed.includes(role)) {
-    reply.code(403).send({ error: 'Forbidden: role '+role+' not allowed' });
-    return false;
-  }
-  return true;
-}
 
 // Health
 app.get('/health', async () => ({ status: 'ok' }));
@@ -105,12 +114,18 @@ app.post('/auth/magic/verify', async (req, reply) => {
   }
   await markInvitationUsed(token);
   const user = await upsertUserByEmail(inv.email, 'guardian');
-  return { sessionToken: 'dev-session', user: { id: user.id, email: user.email, role: user.role } };
+  await createSession(reply, user.id);
+  return { user: { id: user.id, email: user.email, role: user.role } };
+});
+
+app.post('/auth/logout', async (req, reply) => {
+  await destroySession(req, reply);
+  return { ok: true };
 });
 
 // Admin: invites (admin only)
 app.post('/admin/invitations', async (req, reply) => {
-  if(!requireRole(req, reply, ['admin'])) return;
+  if (!(await requireRole(req, reply, ['admin']))) return;
   const schema = z.object({ csvText: z.string().min(1) });
   const { csvText } = schema.parse(req.body);
   const lines = csvText.trim().split(/\r?\n/);
@@ -135,7 +150,7 @@ app.post('/admin/invitations', async (req, reply) => {
 
 // Admin: test push/email (admin only)
 app.post('/admin/test-push', async (req, reply) => {
-  if(!requireRole(req, reply, ['admin'])) return;
+  if (!(await requireRole(req, reply, ['admin']))) return;
   const schema = z.object({ classId: z.string(), title: z.string(), body: z.string() });
   const { classId, title, body } = schema.parse(req.body);
   const tokens = await getClassTokens(classId);
@@ -143,7 +158,7 @@ app.post('/admin/test-push', async (req, reply) => {
 });
 
 app.post('/admin/test-email', async (req, reply) => {
-  if(!requireRole(req, reply, ['admin'])) return;
+  if (!(await requireRole(req, reply, ['admin']))) return;
   try {
     await emailProvider.sendInvite('you@example.com','Test från SkolApp','Hej från SkolApp – SMTP funkar!');
     return { ok:true };
@@ -167,7 +182,7 @@ app.get('/classes/:id/events', async (req) => {
   return await listEvents(id);
 });
 app.post('/events', async (req, reply) => {
-  if(!requireRole(req, reply, ['teacher','admin'])) return;
+  if (!(await requireRole(req, reply, ['teacher', 'admin']))) return;
   const schema = z.object({ classId: z.string(), type: z.string(), title: z.string(), description: z.string().optional(), start: z.string(), end: z.string() });
   const body = schema.parse(req.body);
   const evt = await createEvent(body);
@@ -176,7 +191,7 @@ app.post('/events', async (req, reply) => {
   return evt;
 });
 app.delete('/events/:id', async (req, reply) => {
-  if(!requireRole(req, reply, ['teacher','admin'])) return;
+  if (!(await requireRole(req, reply, ['teacher', 'admin']))) return;
   const { id } = (req.params as any);
   return await deleteEvent(id);
 });
