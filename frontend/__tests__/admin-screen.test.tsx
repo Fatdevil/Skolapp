@@ -45,6 +45,14 @@ function buildAuthUser(role: UserRole) {
   } as any;
 }
 
+beforeAll(() => {
+  jest.useFakeTimers();
+});
+
+afterAll(() => {
+  jest.useRealTimers();
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockUseAuth.mockReturnValue(buildAuthUser('admin'));
@@ -73,15 +81,19 @@ describe('AdminScreen', () => {
     });
     await act(async () => {
       fireEvent.press(screen.getByText('Uppgradera'));
+      jest.runAllTimers();
     });
 
-    await waitFor(() => {
-      expect(mockPromoteUser).toHaveBeenCalled();
-    });
+    expect(mockPromoteUser).toHaveBeenCalledTimes(1);
     expect(mockPromoteUser).toHaveBeenCalledWith({ email: 'teacher@example.com', role: 'admin' });
-    await waitFor(() => {
-      expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
+
+    const promoteCall = mockPromoteUser.mock.results[0];
+    expect(promoteCall?.value).toBeDefined();
+    await act(async () => {
+      await promoteCall!.value;
     });
+
+    expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
   });
 
   test('teachers see warning and forbidden promote shows error toast', async () => {
