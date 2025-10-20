@@ -1,17 +1,37 @@
-name: Security & Secrets
+name: Security & Secrets / scan
+
 on:
   pull_request:
-    branches: [ main ]
+  push:
+    branches: [ main, master ]
+
 jobs:
-  scan:
+  gitleaks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Secret scan (gitleaks)
-        uses: zricethezav/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout (full history for PR range)
+        uses: actions/checkout@v4
         with:
-          args: '--verbose'
-      - name: Audit
-        run: npm audit --omit=dev || true
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: >-
+            detect
+            --redact
+            --report-format sarif
+            --report-path results.sarif
+            --exit-code 1
+            --source .
+            --no-git
+
+      - name: Upload SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif

@@ -1,0 +1,8 @@
+**/node_modules
+**/.git
+**/.github
+**/backend
+**/frontend
+**/scripts
+**/sql
+**/coverage
