@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "installCommand": "echo 'Skipping install step'",
+  "buildCommand": "mkdir -p public && echo '<!doctype html><meta charset=\"utf-8\"><title>SkolApp CI</title><h1>SkolApp CI Placeholder</h1><p>Commit: $VERCEL_GIT_COMMIT_SHA</p>' > public/index.html",
+  "outputDirectory": "public"
+}
