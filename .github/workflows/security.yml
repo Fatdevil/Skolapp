@@ -25,13 +25,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: >-
-            detect
-            --redact
+            detect --redact
             --report-format sarif
             --report-path results.sarif
             --exit-code 1
-            --source .
-            --no-git
+            --no-git --source .
+            --config .gitleaks.toml
 
       - name: Upload SARIF to GitHub Security tab
         if: always() && steps.gitleaks.outcome != 'cancelled' && hashFiles('results.sarif') != ''

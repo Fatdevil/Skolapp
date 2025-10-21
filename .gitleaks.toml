@@ -1,0 +1,13 @@
+title = "Skolapp gitleaks config"
+
+[allowlist]
+description = "Allow obvious non-secrets"
+regexes = [
+  '''PLEASE_SET_IN_ENV''',
+  '''<SET-IN-ENV>''',
+  '''CHANGE[-_ ]?ME'''
+]
+paths = [
+  '''^backend/\.env\.example$''',
+  '''^frontend/\.env\.example$'''
+]

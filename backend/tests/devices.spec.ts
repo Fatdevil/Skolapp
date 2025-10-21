@@ -5,9 +5,6 @@ import { backfillDeviceTokenHashes } from '../scripts/backfill-device-token-hash
 import { dedupeDevices } from '../scripts/dedupe-devices.js';
 import { getMetricsSummary } from '../src/metrics.js';
 
-const ENC_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
-const HASH_KEY = Buffer.from('fedcba9876543210fedcba9876543210').toString('base64');
-
 type DeviceRecord = {
   id: string;
   class_id: string | null;
@@ -229,11 +226,6 @@ const silentLogger: ConsoleLike = {
 };
 
 describe('hmacTokenHash', () => {
-  beforeEach(() => {
-    process.env.PII_ENC_KEY = ENC_KEY;
-    process.env.PII_HASH_KEY = HASH_KEY;
-  });
-
   it('is deterministic per token', () => {
     const a1 = hmacTokenHash('token-a');
     const a2 = hmacTokenHash('token-a');
@@ -245,8 +237,6 @@ describe('hmacTokenHash', () => {
 
 describe('registerDevice', () => {
   beforeEach(() => {
-    process.env.PII_ENC_KEY = ENC_KEY;
-    process.env.PII_HASH_KEY = HASH_KEY;
     store.reset();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2024-01-01T00:00:00.000Z'));
@@ -290,8 +280,6 @@ describe('registerDevice', () => {
 
 describe('backfill and dedupe scripts', () => {
   beforeEach(() => {
-    process.env.PII_ENC_KEY = ENC_KEY;
-    process.env.PII_HASH_KEY = HASH_KEY;
     store.reset();
   });
 
