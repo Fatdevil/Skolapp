@@ -33,6 +33,7 @@ export type DedupeResult = {
   deleted: number;
   failures: number;
   dryRun: boolean;
+  batches: number;
 };
 
 function parseTimestamp(value: string | null): number {
@@ -157,9 +158,89 @@ function groupByTokenHash(rows: DeviceRow[]): DeviceRow[][] {
   return groups;
 }
 
+const DEFAULT_PAGE_SIZE = 1000;
+
+function resolvePageSize(options: DedupeOptions): number {
+  if (options.chunkSize && options.chunkSize > 0) {
+    return options.chunkSize;
+  }
+  const envValue = Number.parseInt(process.env.DEDUP_PAGE_SIZE ?? '', 10);
+  if (Number.isFinite(envValue) && envValue > 0) {
+    return envValue;
+  }
+  return DEFAULT_PAGE_SIZE;
+}
+
+async function fetchFirstPage(
+  client: ReturnType<typeof getSupabase>,
+  fields: string,
+  pageSize: number
+): Promise<{ data: DeviceRow[]; error: any }> {
+  const { data, error } = await client
+    .from('devices')
+    .select(fields)
+    .not('token_hash', 'is', null)
+    .order('token_hash', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true, nullsFirst: false })
+    .limit(pageSize);
+  return { data: (data ?? []) as DeviceRow[], error };
+}
+
+async function fetchPageAfter(
+  client: ReturnType<typeof getSupabase>,
+  fields: string,
+  pageSize: number,
+  lastKey: { token_hash: string; id: string }
+): Promise<{ data: DeviceRow[]; error: any }>
+{
+  const batches: DeviceRow[] = [];
+
+  const { data: sameHashData, error: sameHashError } = await client
+    .from('devices')
+    .select(fields)
+    .eq('token_hash', lastKey.token_hash)
+    .gt('id', lastKey.id)
+    .order('token_hash', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true, nullsFirst: false })
+    .limit(pageSize);
+
+  if (sameHashError) {
+    return { data: [], error: sameHashError };
+  }
+
+  const sameHashRows = (sameHashData ?? []) as DeviceRow[];
+  if (sameHashRows.length > 0) {
+    batches.push(...sameHashRows);
+  }
+
+  if (sameHashRows.length >= pageSize) {
+    return { data: batches, error: null };
+  }
+
+  const remaining = pageSize - sameHashRows.length;
+  const { data: nextHashData, error: nextHashError } = await client
+    .from('devices')
+    .select(fields)
+    .gt('token_hash', lastKey.token_hash)
+    .order('token_hash', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true, nullsFirst: false })
+    .limit(remaining);
+
+  if (nextHashError) {
+    return { data: [], error: nextHashError };
+  }
+
+  const nextHashRows = (nextHashData ?? []) as DeviceRow[];
+  if (nextHashRows.length > 0) {
+    batches.push(...nextHashRows);
+  }
+
+  return { data: batches, error: null };
+}
+
 export async function dedupeDevices(options: DedupeOptions = {}): Promise<DedupeResult> {
   const logger = options.logger ?? console;
-  const chunkSize = options.chunkSize ?? 500;
+  const pageSize = resolvePageSize(options);
   const apply = options.apply ?? false;
   const dryRun = !apply;
 
@@ -180,20 +261,23 @@ export async function dedupeDevices(options: DedupeOptions = {}): Promise<Dedupe
   }
   const client = supabase;
 
-  let offset = 0;
   let groups = 0;
   let merged = 0;
   let deleted = 0;
   let failures = 0;
   let carry: DeviceRow[] = [];
+  let batches = 0;
+  let lastKey: { token_hash: string; id: string } | null = null;
+
+  const fields =
+    'id,user_id,class_id,expo_token,expo_token_iv,expo_token_tag,token_hash,last_seen_at,created_at';
 
   while (true) {
-    const { data, error } = await client
-      .from('devices')
-      .select('id,user_id,class_id,expo_token,expo_token_iv,expo_token_tag,token_hash,last_seen_at,created_at')
-      .order('token_hash', { ascending: true, nullsFirst: false })
-      .order('last_seen_at', { ascending: false, nullsFirst: false })
-      .range(offset, offset + chunkSize - 1);
+    const result = lastKey
+      ? await fetchPageAfter(client, fields, pageSize, lastKey)
+      : await fetchFirstPage(client, fields, pageSize);
+
+    const { data, error } = result;
 
     if (error) {
       logger.error(`Kunde inte läsa devices för dedupe: ${error.message ?? error}`);
@@ -206,11 +290,22 @@ export async function dedupeDevices(options: DedupeOptions = {}): Promise<Dedupe
       break;
     }
 
-    offset += rows.length;
+    batches++;
+
+    let anchorIndex = rows.length - 1;
+    while (anchorIndex >= 0 && !rows[anchorIndex]!.token_hash) {
+      anchorIndex--;
+    }
+    if (anchorIndex >= 0) {
+      const anchor = rows[anchorIndex]!;
+      lastKey = { token_hash: anchor.token_hash!, id: anchor.id };
+    } else {
+      lastKey = null;
+    }
 
     const filtered = rows.filter((row) => row.token_hash);
     if (filtered.length === 0 && carry.length === 0) {
-      if (rows.length < chunkSize) {
+      if (rows.length < pageSize) {
         break;
       }
       continue;
@@ -218,7 +313,7 @@ export async function dedupeDevices(options: DedupeOptions = {}): Promise<Dedupe
 
     const combined = [...carry, ...filtered];
     let processUntil = combined.length;
-    if (filtered.length > 0 && rows.length === chunkSize) {
+    if (filtered.length > 0 && rows.length === pageSize) {
       const lastHash = filtered[filtered.length - 1]!.token_hash;
       if (lastHash) {
         let index = combined.length - 1;
@@ -234,41 +329,66 @@ export async function dedupeDevices(options: DedupeOptions = {}): Promise<Dedupe
 
     const toProcess = combined.slice(0, processUntil);
     const duplicateGroups = groupByTokenHash(toProcess);
+    let batchGroups = 0;
+    let batchDeleted = 0;
+    let batchMerged = 0;
     for (const group of duplicateGroups) {
       groups++;
+      batchGroups++;
       const result = await processGroup(client, group, apply, logger);
       merged += result.merged;
+      batchMerged += result.merged;
       deleted += result.deleted;
+      batchDeleted += result.deleted;
       failures += result.failures;
     }
 
-    if (rows.length < chunkSize) {
+    logger.log(
+      `Batch ${batches}: groupsSeen=${batchGroups}, deleted=${batchDeleted}, merged=${batchMerged}, totalDeleted=${deleted}`
+    );
+
+    if (rows.length < pageSize) {
       break;
     }
   }
 
   if (carry.length > 0) {
     const duplicateGroups = groupByTokenHash(carry);
+    let batchGroups = 0;
+    let batchDeleted = 0;
+    let batchMerged = 0;
     for (const group of duplicateGroups) {
       groups++;
+      batchGroups++;
       const result = await processGroup(client, group, apply, logger);
       merged += result.merged;
+      batchMerged += result.merged;
       deleted += result.deleted;
+      batchDeleted += result.deleted;
       failures += result.failures;
+    }
+    if (batchGroups > 0) {
+      batches++;
+      logger.log(
+        `Batch ${batches}: groupsSeen=${batchGroups}, deleted=${batchDeleted}, merged=${batchMerged}, totalDeleted=${deleted}`
+      );
     }
   }
 
   logger.log(
-    `Dedupe klar: groups=${groups}, merged=${merged}, deleted=${deleted}, failures=${failures}, dryRun=${dryRun}`
+    `Dedupe klar: groups=${groups}, merged=${merged}, deleted=${deleted}, failures=${failures}, dryRun=${dryRun}, batches=${batches}`
   );
 
-  return { groups, merged, deleted, failures, dryRun };
+  return { groups, merged, deleted, failures, dryRun, batches };
 }
 
 async function main() {
   const applyFlag = process.argv.includes('--apply');
   const dryFlag = process.argv.includes('--dry-run') || process.argv.includes('--dry');
   const apply = applyFlag && !dryFlag;
+  if (!apply) {
+    console.log('[dedupe-devices] Kör i dry-run-läge. Lägg till --apply för att ta bort dubbletter.');
+  }
   const result = await dedupeDevices({ apply });
   if (result.failures > 0) {
     process.exitCode = 1;

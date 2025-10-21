@@ -47,6 +47,14 @@ class SelectBuilder {
     return this;
   }
 
+  not(column: keyof DeviceRecord | string, operator: 'is', value: any) {
+    if (operator === 'is' && value === null) {
+      this.filters.push((row) => (row as any)[column] !== null);
+      return this;
+    }
+    throw new Error('Unsupported not operation');
+  }
+
   gt(column: keyof DeviceRecord | string, value: any) {
     this.filters.push((row) => {
       const current = (row as any)[column];

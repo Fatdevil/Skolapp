@@ -143,9 +143,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
    npm run --workspace backend backfill:device-hash
    ```
    - Skriptet loggar hur många rader som uppdaterades och exit-kodar ≠0 om något misslyckas.
-3. Deduplikera devices (börja med torrkörning):
+3. Deduplikera devices:
    ```
-   npm run --workspace backend dedupe:devices
+   npm run --workspace backend dedupe:devices -- --dry
+   ```
+   - Granska loggarna per batch och säkerställ att alla grupper räknas innan du går vidare.
+   - Justera sidstorlek med `DEDUP_PAGE_SIZE=<antal>` om Supabase begränsar svarsstorleken (default 1000 rader).
+   ```
    npm run --workspace backend dedupe:devices -- --apply
    ```
    - `devices_deduplicated_total`-metrisken ökar med antalet rader som tas bort.
