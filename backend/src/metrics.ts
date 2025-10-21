@@ -71,6 +71,18 @@ const pushSendTotal = new Counter({
   registers: [registry]
 });
 
+const devicesRegisteredTotal = new Counter({
+  name: 'devices_registered_total',
+  help: 'Total device registrations processed (including updates)',
+  registers: [registry]
+});
+
+const devicesDeduplicatedTotal = new Counter({
+  name: 'devices_deduplicated_total',
+  help: 'Total duplicate device rows merged and deleted',
+  registers: [registry]
+});
+
 const cronRemindersSentTotal = new Counter({
   name: 'cron_reminders_sent_total',
   help: 'Total reminders sent from cron jobs',
@@ -190,6 +202,8 @@ export async function getMetricsSummary() {
   const privacyEraseRequestedMetric = await privacyEraseRequestedTotal.get();
   const privacyEraseProcessedMetric = await privacyEraseProcessedTotal.get();
   const retentionMessagesMetric = await retentionMessagesDeletedTotal.get();
+  const devicesRegisteredMetric = await devicesRegisteredTotal.get();
+  const devicesDeduplicatedMetric = await devicesDeduplicatedTotal.get();
   const rbacCount = rbacMetric.values.at(0)?.value ?? 0;
   const rateLimitCount = rateLimitMetric.values.at(0)?.value ?? 0;
   const rateLimitPerMinute = recentRateLimitHits.length;
@@ -211,7 +225,9 @@ export async function getMetricsSummary() {
       privacyExport: privacyExportMetric.values.at(0)?.value ?? 0,
       privacyEraseRequested: privacyEraseRequestedMetric.values.at(0)?.value ?? 0,
       privacyEraseProcessed: privacyEraseProcessedMetric.values.at(0)?.value ?? 0,
-      retentionMessagesDeleted: retentionMessagesMetric.values.at(0)?.value ?? 0
+      retentionMessagesDeleted: retentionMessagesMetric.values.at(0)?.value ?? 0,
+      devicesRegistered: devicesRegisteredMetric.values.at(0)?.value ?? 0,
+      devicesDeduplicated: devicesDeduplicatedMetric.values.at(0)?.value ?? 0
     }
   };
 }
@@ -254,6 +270,16 @@ export function incrementEmailSend(status: 'success' | 'failed') {
 
 export function incrementPushSend(status: 'success' | 'failed') {
   pushSendTotal.inc({ status });
+}
+
+export function incrementDevicesRegistered(count = 1) {
+  if (count <= 0) return;
+  devicesRegisteredTotal.inc(count);
+}
+
+export function incrementDevicesDeduplicated(count = 1) {
+  if (count <= 0) return;
+  devicesDeduplicatedTotal.inc(count);
 }
 
 export function incrementCronRemindersSent(count: number) {
