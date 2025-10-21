@@ -19,6 +19,11 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `PILOT_RETURN_TOKEN` | `false` |
 | `INVITE_RATE_LIMIT_PER_IP` | `10` |
 | `VERIFY_RATE_LIMIT_PER_IP` | `20` |
+| `PII_ENC_KEY` | 32 bytes base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
+| `PRIVACY_POLICY_VERSION` | `1` |
+| `RETENTION_DAYS_MESSAGES` | `365` |
+| `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
+| `PRIVACY_ERASE_RATE_PER_IP` | `3` |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-leverantör |
 | `METRICS_ENABLED` | `true` (aktivera `/metrics`) |
 | `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` |
@@ -39,6 +44,11 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `PILOT_RETURN_TOKEN` | `false` (endast `true` lokalt) |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-konfiguration |
 | `INVITE_RATE_LIMIT_PER_IP` / `VERIFY_RATE_LIMIT_PER_IP` | Samma värden som i GitHub |
+| `PII_ENC_KEY` | Samma som GitHub secret |
+| `PRIVACY_POLICY_VERSION` | `1` |
+| `RETENTION_DAYS_MESSAGES` | `365` |
+| `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
+| `PRIVACY_ERASE_RATE_PER_IP` | `3` |
 | `METRICS_ENABLED` | `true` |
 | `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` |
 | `LOG_REDACT_FIELDS` | `body.password,body.token,headers.authorization` |
@@ -72,6 +82,7 @@ API_BASE_URL="https://api.pilot.skolapp.se" \
 - Sätt `PILOT_RETURN_TOKEN=false` i alla miljöer.
 - Begränsa `CORS_ORIGINS` till `https://pilot.skolapp.se` + de lokala origins som verkligen behövs.
 - Kontrollera att `BANKID_ENABLED` fortfarande är `false` om BankID inte ska vara aktivt.
+- Säkerställ att privacy-variablerna (`PII_ENC_KEY`, `PRIVACY_POLICY_VERSION`, `RETENTION_DAYS_MESSAGES`, `PRIVACY_EXPORT_RATE_PER_IP`, `PRIVACY_ERASE_RATE_PER_IP`) är satta enligt pilotens policy.
 
 ## 6. Sanity-test
 ```
@@ -96,7 +107,30 @@ done
 - `admin/promote` ska returnera `{ "ok": true }`.
 - Sista raden i loopen ska returnera `429` och logga rate-limit i backend-loggarna.
 
-## 7. Observability
+## 7. Privacy smoke
+
+```bash
+# Hämta policy (ska visa version från PRIVACY_POLICY_VERSION)
+curl https://api.pilot.skolapp.se/privacy/policy
+
+# Begär export med autentiserad cookie (rate-limit styrs av PRIVACY_EXPORT_RATE_PER_IP)
+curl -b backend/.tmp/cookies.txt -X POST https://api.pilot.skolapp.se/privacy/export -o export.json
+
+# Begär radering (läggs i kö)
+curl -b backend/.tmp/cookies.txt -X POST https://api.pilot.skolapp.se/privacy/erase
+
+# (Dev) Kör erase-jobbet manuellt
+node --env-file backend/.env backend/scripts/run-erase-processor.ts
+
+# Roterar PII_ENC_KEY – generera ny nyckel och uppdatera secrets
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+- Kontrollera att audit-loggen innehåller `privacy_export`, `privacy_erase_requested` och `privacy_erase_processed` efter körning.
+- Vid nyckelrotation: uppdatera `PII_ENC_KEY` i GitHub + Vercel, deploya backend och kör `npm run --workspace backend migrate:dev` om nya krypterade kolumner tillkommit. Befintliga tokens kan roteras genom att klienterna registrerar sig igen.
+- Sätt `RETENTION_DAYS_MESSAGES=0` i en temporär miljö för att validera att cron-jobbet soft-deletar gamla meddelanden.
+
+## 8. Observability
 - Kontrollera att `METRICS_ENABLED=true` i miljön och att `curl https://api.pilot.skolapp.se/metrics` returnerar text med `http_request_duration_seconds`.
 - Efter ett `POST /auth/magic/initiate` ska `auth_magic_initiate_total` öka (se smoke-scriptet för referensflöde).
 - `/metrics/summary` kräver admin-cookie: verifiera p50/p95-latens och `requestsPerMinute`. Administratörerna använder samma endpoint i Observability-fliken.
@@ -105,7 +139,7 @@ done
 - API-loggar (JSON) finns i Vercel → Logs. Sök på `alert.triggered` för att se rate-limit/5xx hookar.
 - Viktiga signaler: spikar i 5xx (tröskel från `METRICS_5XX_ALERT_THRESHOLD`), rate-limit warnings (`Rate limit exceeded`), `cron_reminders_sent_total` som ökar enligt schema.
 
-## 8. Rollback
+## 9. Rollback
 1. Återställ env:
    - Sätt tillbaka tidigare GitHub/Vercel-secrets om fel värde deployats.
    - Rulla tillbaka till föregående Vercel release (`Deployments → Promote previous`).

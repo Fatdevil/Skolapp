@@ -77,6 +77,30 @@ const cronRemindersSentTotal = new Counter({
   registers: [registry]
 });
 
+const privacyExportTotal = new Counter({
+  name: 'privacy_export_total',
+  help: 'Total privacy data exports',
+  registers: [registry]
+});
+
+const privacyEraseRequestedTotal = new Counter({
+  name: 'privacy_erase_requested_total',
+  help: 'Total privacy erase requests',
+  registers: [registry]
+});
+
+const privacyEraseProcessedTotal = new Counter({
+  name: 'privacy_erase_processed_total',
+  help: 'Total privacy erase requests processed',
+  registers: [registry]
+});
+
+const retentionMessagesDeletedTotal = new Counter({
+  name: 'retention_messages_deleted_total',
+  help: 'Total messages soft deleted due to retention',
+  registers: [registry]
+});
+
 const supabaseQueryErrorsTotal = new Counter({
   name: 'supabase_query_errors_total',
   help: 'Total number of Supabase query errors',
@@ -162,6 +186,10 @@ export async function getMetricsSummary() {
   const rbacMetric = await rbacForbiddenTotal.get();
   const rateLimitMetric = await rateLimitHitTotal.get();
   const cronMetric = await cronRemindersSentTotal.get();
+  const privacyExportMetric = await privacyExportTotal.get();
+  const privacyEraseRequestedMetric = await privacyEraseRequestedTotal.get();
+  const privacyEraseProcessedMetric = await privacyEraseProcessedTotal.get();
+  const retentionMessagesMetric = await retentionMessagesDeletedTotal.get();
   const rbacCount = rbacMetric.values.at(0)?.value ?? 0;
   const rateLimitCount = rateLimitMetric.values.at(0)?.value ?? 0;
   const rateLimitPerMinute = recentRateLimitHits.length;
@@ -179,7 +207,11 @@ export async function getMetricsSummary() {
     counters: {
       rbacForbidden: rbacCount,
       rateLimitHit: rateLimitCount,
-      cronRemindersSent: cronMetric.values.at(0)?.value ?? 0
+      cronRemindersSent: cronMetric.values.at(0)?.value ?? 0,
+      privacyExport: privacyExportMetric.values.at(0)?.value ?? 0,
+      privacyEraseRequested: privacyEraseRequestedMetric.values.at(0)?.value ?? 0,
+      privacyEraseProcessed: privacyEraseProcessedMetric.values.at(0)?.value ?? 0,
+      retentionMessagesDeleted: retentionMessagesMetric.values.at(0)?.value ?? 0
     }
   };
 }
@@ -227,6 +259,23 @@ export function incrementPushSend(status: 'success' | 'failed') {
 export function incrementCronRemindersSent(count: number) {
   if (count <= 0) return;
   cronRemindersSentTotal.inc(count);
+}
+
+export function incrementPrivacyExport() {
+  privacyExportTotal.inc();
+}
+
+export function incrementPrivacyEraseRequested() {
+  privacyEraseRequestedTotal.inc();
+}
+
+export function incrementPrivacyEraseProcessed() {
+  privacyEraseProcessedTotal.inc();
+}
+
+export function incrementRetentionMessagesDeleted(count: number) {
+  if (count <= 0) return;
+  retentionMessagesDeletedTotal.inc(count);
 }
 
 export function incrementSupabaseQueryErrors() {

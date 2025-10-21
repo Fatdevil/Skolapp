@@ -27,7 +27,11 @@ jest.mock('../src/services/api', () => {
     sendMessage: jest.fn(),
     registerDevice: jest.fn(),
     uploadInvites: jest.fn(),
-    sendTestPush: jest.fn()
+    sendTestPush: jest.fn(),
+    getPrivacyPolicy: jest.fn(),
+    submitPrivacyConsent: jest.fn(),
+    requestPrivacyExport: jest.fn(),
+    requestPrivacyErase: jest.fn()
   };
 });
 
@@ -40,6 +44,7 @@ describe('AuthContext + routing', () => {
   const mockGetEvents = api.getEvents as jest.MockedFunction<typeof api.getEvents>;
   const mockDeleteEvent = api.deleteEvent as jest.MockedFunction<typeof api.deleteEvent>;
   const mockRegisterDevice = api.registerDevice as jest.MockedFunction<typeof api.registerDevice>;
+  const mockGetPrivacyPolicy = api.getPrivacyPolicy as jest.MockedFunction<typeof api.getPrivacyPolicy>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -47,11 +52,12 @@ describe('AuthContext + routing', () => {
     mockGetEvents.mockResolvedValue([]);
     mockDeleteEvent.mockResolvedValue({ ok: true });
     mockRegisterDevice.mockResolvedValue({ ok: true } as any);
+    mockGetPrivacyPolicy.mockResolvedValue({ version: 1, text: 'Policy text' });
   });
 
   test('bootstrap with existing session renders app tabs', async () => {
     mockWhoami.mockResolvedValue({
-      user: { id: 'u1', email: 'user@example.com', role: 'guardian' }
+      user: { id: 'u1', email: 'user@example.com', role: 'guardian', privacyConsentAt: '2025-01-01T12:00:00Z' }
     });
 
     const screen = render(<App />);
@@ -75,9 +81,9 @@ describe('AuthContext + routing', () => {
   test('magic link verify flow logs user in', async () => {
     mockWhoami
       .mockRejectedValueOnce({ response: { status: 401 } })
-      .mockResolvedValue({ user: { id: 'u2', email: 'login@example.com', role: 'guardian' } });
+      .mockResolvedValue({ user: { id: 'u2', email: 'login@example.com', role: 'guardian', privacyConsentAt: '2025-01-01T12:00:00Z' } });
     mockInitiate.mockResolvedValue({ ok: true, token: 'dev-token' });
-    mockVerify.mockResolvedValue({ user: { id: 'u2', email: 'login@example.com', role: 'guardian' } });
+    mockVerify.mockResolvedValue({ user: { id: 'u2', email: 'login@example.com', role: 'guardian', privacyConsentAt: '2025-01-01T12:00:00Z' } });
 
     const screen = render(<App />);
 
@@ -107,7 +113,7 @@ describe('AuthContext + routing', () => {
   });
 
   test('role gating hides admin tab for guardians and shows for teachers', async () => {
-    mockWhoami.mockResolvedValue({ user: { id: 'g1', email: 'g@example.com', role: 'guardian' } });
+    mockWhoami.mockResolvedValue({ user: { id: 'g1', email: 'g@example.com', role: 'guardian', privacyConsentAt: '2025-01-01T12:00:00Z' } });
 
     let screen = render(<App />);
     await waitFor(() => {
@@ -117,7 +123,7 @@ describe('AuthContext + routing', () => {
 
     screen.unmount();
 
-    mockWhoami.mockResolvedValue({ user: { id: 't1', email: 't@example.com', role: 'teacher' } });
+    mockWhoami.mockResolvedValue({ user: { id: 't1', email: 't@example.com', role: 'teacher', privacyConsentAt: '2025-01-01T12:00:00Z' } });
     screen = render(<App />);
     await waitFor(() => {
       expect(screen.queryAllByText('Kalender').length).toBeGreaterThan(0);
@@ -126,7 +132,7 @@ describe('AuthContext + routing', () => {
   });
 
   test('logout clears session and shows login screen', async () => {
-    mockWhoami.mockResolvedValue({ user: { id: 't1', email: 't@example.com', role: 'teacher' } });
+    mockWhoami.mockResolvedValue({ user: { id: 't1', email: 't@example.com', role: 'teacher', privacyConsentAt: '2025-01-01T12:00:00Z' } });
     mockLogout.mockResolvedValue({ ok: true });
 
     const screen = render(<App />);

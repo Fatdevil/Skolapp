@@ -43,6 +43,8 @@ import {
   recordRequest
 } from './metrics.js';
 import { registerAlertHandler } from './alerts.js';
+import { registerPrivacyRoutes } from './routes/privacy.js';
+import { startEraseProcessor } from './jobs/eraseProcessor.js';
 
 const logRedactDefaults = [
   'req.headers.authorization',
@@ -109,6 +111,8 @@ function parseRateLimitEnv(key: string, fallback: number) {
 
 const inviteRateLimit = parseRateLimitEnv('INVITE_RATE_LIMIT_PER_IP', 10);
 const verifyRateLimit = parseRateLimitEnv('VERIFY_RATE_LIMIT_PER_IP', 20);
+const privacyExportRateLimit = parseRateLimitEnv('PRIVACY_EXPORT_RATE_PER_IP', 5);
+const privacyEraseRateLimit = parseRateLimitEnv('PRIVACY_ERASE_RATE_PER_IP', 3);
 const adminRateLimitConfig = {
   max: 30,
   timeWindow: '1 minute',
@@ -218,6 +222,13 @@ app.get('/auth/capabilities', async () => ({ bankid: bankidEnabled, magic: true 
 
 await ensureDefaultClass();
 startReminderWorkerSupabase();
+
+await registerPrivacyRoutes(app, {
+  exportRateLimit: privacyExportRateLimit,
+  eraseRateLimit: privacyEraseRateLimit
+});
+
+startEraseProcessor(app.log);
 
 // Health
 app.get('/health', async () => ({ status: 'ok' }));
@@ -435,7 +446,16 @@ app.get('/auth/whoami', async (req, reply) => {
   if (!user) {
     return reply.code(401).send({ error: 'Unauthenticated' });
   }
-  return { user: { id: user.id, email: user.email, role: user.role } };
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      privacyConsentVersion: user.privacy_consent_version ?? null,
+      privacyConsentAt: user.privacy_consent_at ?? null,
+      eraseRequestedAt: user.erase_requested_at ?? null
+    }
+  };
 });
 
 app.post('/auth/logout', async (req, reply) => {
@@ -527,10 +547,14 @@ app.post(
 );
 
 // Devices & Push
-app.post('/devices/register', async (req) => {
+app.post('/devices/register', async (req, reply) => {
   const schema = z.object({ expoPushToken: z.string().min(10), classId: z.string() });
   const { expoPushToken, classId } = schema.parse(req.body);
-  await registerDevice(classId, expoPushToken);
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return reply.code(401).send({ error: 'Unauthenticated' });
+  }
+  await registerDevice(classId, expoPushToken, user.id);
   return { ok: true };
 });
 
@@ -543,7 +567,11 @@ app.post('/events', async (req, reply) => {
   if (!(await requireRole(req, reply, ['teacher', 'admin']))) return;
   const schema = z.object({ classId: z.string(), type: z.string(), title: z.string(), description: z.string().optional(), start: z.string(), end: z.string() });
   const body = schema.parse(req.body);
-  const evt = await createEvent(body);
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return reply.code(401).send({ error: 'Unauthenticated' });
+  }
+  const evt = await createEvent({ ...body, createdBy: user.id });
   const tokens = await getClassTokens(body.classId);
   await sendPush(tokens, `Ny ${body.type.toLowerCase()} i klassen`, `${body.title} – ${new Date(body.start).toLocaleString()}`);
   return evt;
@@ -551,7 +579,8 @@ app.post('/events', async (req, reply) => {
 app.delete('/events/:id', async (req, reply) => {
   if (!(await requireRole(req, reply, ['teacher', 'admin']))) return;
   const { id } = (req.params as any);
-  return await deleteEvent(id);
+  const user = await getUserFromRequest(req);
+  return await deleteEvent(id, user?.id ?? null);
 });
 
 // Messages
@@ -559,11 +588,21 @@ app.get('/classes/:id/messages', async (req) => {
   const { id } = (req.params as any);
   return await listMessages(id);
 });
-app.post('/messages', async (req) => {
+app.post('/messages', async (req, reply) => {
   const schema = z.object({ classId: z.string(), text: z.string().min(1) });
   const body = schema.parse(req.body);
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return reply.code(401).send({ error: 'Unauthenticated' });
+  }
   const mod = moderate(body.text);
-  const msg = await postMessage({ classId: body.classId, senderId:'g1', senderName:'Anna Andersson', text: body.text, flagged: !!mod.flagged });
+  const msg = await postMessage({
+    classId: body.classId,
+    senderId: user.id,
+    senderName: user.email,
+    text: body.text,
+    flagged: !!mod.flagged
+  });
   return msg;
 });
 

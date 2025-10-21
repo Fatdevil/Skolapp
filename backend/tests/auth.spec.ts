@@ -139,6 +139,12 @@ vi.mock('../src/util/remindersSupabase.js', () => ({
   startReminderWorkerSupabase: vi.fn(),
   getRemindersHealth: vi.fn(() => ({ at: 0, checked: 0, sent: 0 }))
 }));
+vi.mock('../src/routes/privacy.js', () => ({
+  registerPrivacyRoutes: vi.fn()
+}));
+vi.mock('../src/jobs/eraseProcessor.js', () => ({
+  startEraseProcessor: vi.fn()
+}));
 const classes = new Map<string, { id: string; name: string; code: string }>();
 
 vi.mock('../src/db/supabase.js', () => ({

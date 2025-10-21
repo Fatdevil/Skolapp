@@ -34,6 +34,11 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
   | `PILOT_RETURN_TOKEN` | `false` i stage/prod |
   | `INVITE_RATE_LIMIT_PER_IP` | `10` |
   | `VERIFY_RATE_LIMIT_PER_IP` | `20` |
+  | `PII_ENC_KEY` | 32 bytes base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
+  | `PRIVACY_POLICY_VERSION` | `1` |
+  | `RETENTION_DAYS_MESSAGES` | `365` |
+  | `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
+  | `PRIVACY_ERASE_RATE_PER_IP` | `3` |
   | `METRICS_ENABLED` | `true` för stage/prod (exponera `/metrics`) |
   | `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` (justera vid behov) |
   | `LOG_REDACT_FIELDS` | `body.password,body.token,headers.authorization` (lägg till egna) |
@@ -54,6 +59,11 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
   | `PILOT_RETURN_TOKEN` | `false` i stage/prod, `true` endast lokalt |
   | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-konfiguration |
   | `INVITE_RATE_LIMIT_PER_IP` & `VERIFY_RATE_LIMIT_PER_IP` | Samma värden som i GitHub |
+  | `PII_ENC_KEY` | Samma som GitHub secret |
+  | `PRIVACY_POLICY_VERSION` | `1` |
+  | `RETENTION_DAYS_MESSAGES` | `365` |
+  | `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
+  | `PRIVACY_ERASE_RATE_PER_IP` | `3` |
 
 > Tips: Spegla secrets mellan GitHub & Vercel via 1Password/HashiCorp Vault så att samma värden används i CI, staging och prod.
 
@@ -97,6 +107,10 @@ API_BASE_URL=https://api.pilot.skolapp.se npm run --workspace backend smoke
 - `ADMIN_BOOTSTRAP_TOKEN` – används en gång för att skapa första admin via `/admin/bootstrap`.
 - `ADMIN_API_KEY` – behövs för server/CLI-uppgraderingar via `/admin/promote`.
 - `INVITE_RATE_LIMIT_PER_IP` & `VERIFY_RATE_LIMIT_PER_IP` – styr per-IP rate-limit för magic-link initiering/verifiering.
+- `PII_ENC_KEY` – bas64-kodad AES-256-GCM-nyckel för lagring av push-tokens och annan PII (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`).
+- `PRIVACY_POLICY_VERSION` – styr vilken policyversion som skickas från `/privacy/policy` och sparas vid samtycke.
+- `RETENTION_DAYS_MESSAGES` – antal dagar innan meddelanden soft-deletas av retention-jobbet.
+- `PRIVACY_EXPORT_RATE_PER_IP` & `PRIVACY_ERASE_RATE_PER_IP` – rate-limits för privacy-endpoints.
 - `CORS_ORIGINS` – kommaseparerad lista med tillåtna ursprung (standard: `https://pilot.skolapp.se,http://localhost:19006`).
 - `PILOT_RETURN_TOKEN` – sätt till `true` i lokal utveckling om du vill få tillbaka engångstoken i svaret från `/auth/magic/initiate`.
 - `SUPABASE_URL` & `SUPABASE_SERVICE_ROLE` – används av backend och migrations-scriptet.

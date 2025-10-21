@@ -6,6 +6,9 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   role: UserRole;
+  privacyConsentVersion?: number | null;
+  privacyConsentAt?: string | null;
+  eraseRequestedAt?: string | null;
 }
 
 export interface MetricsSummary {
@@ -52,6 +55,11 @@ export interface AuditResponse {
 
 export interface WhoAmIResponse {
   user: AuthenticatedUser;
+}
+
+export interface PrivacyPolicyResponse {
+  version: number;
+  text: string;
 }
 
 const baseURL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3333';
@@ -142,4 +150,20 @@ export async function sendTestPush(payload: { classId: string; title: string; bo
 
 export async function getAuditLogs(params: AuditQuery) {
   return (await api.get<AuditResponse>('/admin/audit', { params })).data;
+}
+
+export async function getPrivacyPolicy() {
+  return (await api.get<PrivacyPolicyResponse>('/privacy/policy')).data;
+}
+
+export async function submitPrivacyConsent(version: number) {
+  return (await api.post('/privacy/consent', { version })).data as { ok: true; consent: { version: number; at: string } };
+}
+
+export async function requestPrivacyExport() {
+  return (await api.post('/privacy/export')).data;
+}
+
+export async function requestPrivacyErase() {
+  return (await api.post('/privacy/erase')).data as { ok: true; queueId: number };
 }
