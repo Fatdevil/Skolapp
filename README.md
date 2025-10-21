@@ -34,6 +34,11 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
   | `PILOT_RETURN_TOKEN` | `false` i stage/prod |
   | `INVITE_RATE_LIMIT_PER_IP` | `10` |
   | `VERIFY_RATE_LIMIT_PER_IP` | `20` |
+  | `METRICS_ENABLED` | `true` för stage/prod (exponera `/metrics`) |
+  | `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` (justera vid behov) |
+  | `LOG_REDACT_FIELDS` | `body.password,body.token,headers.authorization` (lägg till egna) |
+  | `METRICS_5XX_ALERT_THRESHOLD` | `5` (antal 5xx/min innan alert-hook triggas) |
+  | `METRICS_RATELIMIT_ALERT_THRESHOLD` | `25` (antal 429/min innan alert-hook triggas) |
 
 - **Vercel Environment Variables** (Production + Preview + Development):
 
@@ -73,9 +78,18 @@ API_BASE_URL=https://api.pilot.skolapp.se npm run --workspace backend smoke
 - `backend/scripts/migrate.ts` kör alla `.sql`-filer i `backend/sql/` och loggar vilka som körs. Skriptet ignorerar säkra `already exists`-fel så det går att köra om.
 
 ### Smoke-tests & CI
-- `backend/scripts/smoke.ts` kör en minimal E2E-checklista: `/health`, rate-limit headers, `whoami` utan/med cookie.
+- `backend/scripts/smoke.ts` kör en minimal E2E-checklista: `/health`, rate-limit headers, `whoami` utan/med cookie samt verifierar att `/metrics` ökar `auth_magic_initiate_total`.
 - GitHub Actions-workflow `pilot.yml` kör `npm run migrate:dev`, `npm test`, `npm run smoke` efter deploy. Workflowen bootstrappas automatiskt med `SMOKE_ADMIN_EMAIL` för att säkra cookie innan smoke-testet.
 - Workflow inkluderar gitleaks-scan (från `security.yml`) som tidigare för att säkerställa att inga secrets läckt in i Git.
+
+### Observability & logging
+- Sätt `METRICS_ENABLED=true` för att exponera Prometheus-flödet på `/metrics` (text/plain). Standardmätare + app-specifika counters/histogram ingår.
+- `/metrics/summary` kräver admin-roll och sammanfattar `requestsPerMinute`, `errorsPerMinute`, latens (p50/p95) samt RBAC/429-statistik. Admin UI:s Observability-flik läser samma data.
+- Adminpanelen har nya flikar för **Observability** (hälsa, trafik, rate-limit, cron) och **Audit** (filtrering, paginering, export via API).
+- Loggar skrivs med `pino` i JSON-format och innehåller `requestId`, route, status, user-id/roll. `fastify-request-id` propagerar `x-request-id` i svaren.
+- Lägg till extra redaktionsfält via `LOG_REDACT_FIELDS` (kommaseparerade pathar). Token/authorization-fält maskeras som default.
+- Cron-status finns via `/reminders/health` (`lastRunAt`, `lastSuccessAt`, `lastError`, `sent24h`). `cron_reminders_sent_total` uppdateras för Prometheus.
+- Alert-hooks för 5xx och rate-limit loggar varningar när trösklarna (`METRICS_5XX_ALERT_THRESHOLD`, `METRICS_RATELIMIT_ALERT_THRESHOLD`) passeras.
 
 ### Pilot-konfiguration (backend)
 - `SESSION_SECRET` – hemlig nyckel för att signera cookies (sätts till ett starkt värde i prod/test).

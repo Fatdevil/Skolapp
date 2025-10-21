@@ -139,6 +139,8 @@ vi.mock('../src/util/remindersSupabase.js', () => ({
   startReminderWorkerSupabase: vi.fn(),
   getRemindersHealth: vi.fn(() => ({ at: 0, checked: 0, sent: 0 }))
 }));
+const classes = new Map<string, { id: string; name: string; code: string }>();
+
 vi.mock('../src/db/supabase.js', () => ({
   getSupabase: () => ({
     from(table: string) {
@@ -191,6 +193,26 @@ vi.mock('../src/db/supabase.js', () => ({
                 return {
                   async maybeSingle() {
                     return { data: row, error: null };
+                  }
+                };
+              }
+            };
+          }
+        };
+      }
+      if (table === 'classes') {
+        return {
+          async upsert(row: { id: string; name: string; code: string }) {
+            classes.set(row.id, { ...row });
+            return { data: row, error: null };
+          },
+          select() {
+            return {
+              eq(column: 'id' | 'code', value: string) {
+                const match = Array.from(classes.values()).find((item) => (item as any)[column] === value) ?? null;
+                return {
+                  async maybeSingle() {
+                    return { data: match, error: null };
                   }
                 };
               }

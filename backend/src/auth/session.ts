@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getSupabase } from '../db/supabase.js';
+import { incrementRbacForbidden } from '../metrics.js';
 
 export type Role = 'guardian' | 'teacher' | 'admin';
 
@@ -89,6 +90,7 @@ export async function requireRole(
 ) {
   const role = await getRoleFromRequest(req);
   if (!role || !allowed.includes(role)) {
+    incrementRbacForbidden();
     reply.code(403).send({ error: 'Forbidden' });
     return false;
   }

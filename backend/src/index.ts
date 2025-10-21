@@ -1,10 +1,17 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
+import underPressure from '@fastify/under-pressure';
+// @ts-expect-error fastify-request-id lacks published type definitions
+import fastifyRequestId from 'fastify-request-id';
+import pino from 'pino';
+import pinoHttp from 'pino-http';
+import type { HttpLogger, Options as PinoHttpOptions } from 'pino-http';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import dotenv from 'dotenv'; dotenv.config();
 import { EmailMagicAuth } from './auth/EmailMagicAuth.js';
@@ -24,8 +31,61 @@ import { moderate } from './util/moderation.js';
 import { audit } from './util/audit.js';
 import { maxRole } from './util/roles.js';
 import { getSupabase } from './db/supabase.js';
+import { listAuditLogs } from './repos/auditRepo.js';
+import {
+  getMetricsRegistry,
+  getMetricsSummary,
+  incrementMagicInitiate,
+  incrementMagicVerify,
+  incrementRateLimitHit,
+  incrementRbacForbidden,
+  isMetricsEnabled,
+  recordRequest
+} from './metrics.js';
+import { registerAlertHandler } from './alerts.js';
 
-const app = Fastify({ logger: true });
+const logRedactDefaults = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.body.password',
+  'req.body.token',
+  'req.body.secret',
+  'req.body.otp',
+  'req.body.passcode',
+  'req.body.magicToken',
+  'req.body.invitationToken',
+  'reply.headers["set-cookie"]',
+  'res.headers["set-cookie"]'
+];
+
+const logRedactEnv = (process.env.LOG_REDACT_FIELDS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter((value) => value.length > 0);
+
+const logRedactPaths = Array.from(new Set([...logRedactDefaults, ...logRedactEnv]));
+
+const baseLogger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  redact: {
+    paths: logRedactPaths,
+    remove: true
+  }
+});
+
+const createHttpLogger = pinoHttp as unknown as (opts?: PinoHttpOptions) => HttpLogger;
+
+const httpLogger = createHttpLogger({
+  logger: baseLogger,
+  autoLogging: false
+});
+
+const app = Fastify({ logger: httpLogger.logger });
+const requestTimings = new WeakMap<FastifyRequest, number>();
+
+registerAlertHandler((event) => {
+  app.log.warn({ alert: event.type, count: event.count, windowMs: event.windowMs }, 'alert.triggered');
+});
 
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) {
@@ -66,17 +126,48 @@ await app.register(cookie, {
   hook: 'onRequest'
 });
 
-app.addHook('onRequest', async (req) => {
+await app.register(
+  fastifyRequestId({
+    getId: () => randomUUID(),
+    headerName: 'x-request-id',
+    isAddToResponse: true
+  })
+);
+
+app.addHook('onRequest', async (req, reply) => {
+  requestTimings.set(req as FastifyRequest, Date.now());
   const user = await getUserFromRequest(req);
+  reply.header('x-request-id', req.id);
   req.log.info(
     {
-      id: req.id,
+      requestId: req.id,
       path: req.url,
       method: req.method,
       userId: user?.id ?? null,
       role: user?.role ?? 'anonymous'
     },
-    'incoming'
+    'request.start'
+  );
+});
+
+app.addHook('onResponse', async (req, reply) => {
+  const start = requestTimings.get(req as FastifyRequest) ?? Date.now();
+  const durationMs = Date.now() - start;
+  requestTimings.delete(req as FastifyRequest);
+  const route = req.routeOptions?.url ?? req.url;
+  const user = await getUserFromRequest(req);
+  recordRequest(req.method, route, reply.statusCode, durationMs);
+  req.log.info(
+    {
+      requestId: req.id,
+      route,
+      method: req.method,
+      statusCode: reply.statusCode,
+      durationMs,
+      userId: user?.id ?? null,
+      role: user?.role ?? 'anonymous'
+    },
+    'request.completed'
   );
 });
 
@@ -104,22 +195,45 @@ await app.register(rateLimit, {
   },
   onExceeded: async (req, key) => {
     req.log.warn({ key, path: req.url, method: req.method }, 'Rate limit exceeded');
+    incrementRateLimitHit();
   }
 });
 await app.register(formbody);
 await app.register(swagger, { openapi:{ info:{ title:'SkolApp API', version:'0.4.1'}, servers:[{url:'http://localhost:'+ (process.env.PORT||3333)}] } });
 await app.register(swaggerUi, { routePrefix: '/docs' });
+await app.register(underPressure, {
+  maxEventLoopDelay: 2500,
+  maxHeapUsedBytes: 750 * 1024 * 1024,
+  sampleInterval: 500,
+  exposeStatusRoute: {
+    url: '/system/health',
+    routeOpts: {
+      logLevel: 'warn'
+    }
+  }
+});
 
-// Capabilities
 const bankidEnabled = (process.env.BANKID_ENABLED||'false').toLowerCase()==='true';
 app.get('/auth/capabilities', async () => ({ bankid: bankidEnabled, magic: true }));
 
-// Seed default class + start reminders
 await ensureDefaultClass();
 startReminderWorkerSupabase();
 
 // Health
 app.get('/health', async () => ({ status: 'ok' }));
+
+app.get('/metrics', async (_req, reply) => {
+  if (!isMetricsEnabled()) {
+    return reply.code(404).send({ error: 'metrics_disabled' });
+  }
+  reply.header('content-type', 'text/plain; version=0.0.4');
+  return getMetricsRegistry().metrics();
+});
+
+app.get('/metrics/summary', async (req, reply) => {
+  if (!(await requireRole(req, reply, ['admin']))) return;
+  return getMetricsSummary();
+});
 
 // AUTH magic-link
 const emailProvider = getEmailProvider();
@@ -143,6 +257,7 @@ app.post(
   if (!klass) return reply.code(404).send({ error: 'Klasskod hittades inte' });
   const res = await EmailMagicAuth.initiateLogin({ email, classCode });
   await createInvitation(email, classCode, res.token, 'guardian');
+  incrementMagicInitiate();
   req.log.info({ email, classCode }, 'Magic login initiated');
   const response: { ok: true; token?: string } = { ok: true };
   if (pilotReturnToken) {
@@ -181,6 +296,7 @@ app.post(
   const before = await getUserByEmail(inv.email);
   const invitationRole = (inv.role as Role) ?? 'guardian';
   const user = await upsertUserByEmail(inv.email, invitationRole);
+  incrementMagicVerify();
   await createSession(reply, user.id);
   const upgraded = before ? before.role !== user.role : invitationRole === user.role;
   await audit(
@@ -291,6 +407,28 @@ app.post(
     return { user: { id: user.id, email: user.email, role: user.role } };
   }
 );
+
+app.get('/admin/audit', async (req, reply) => {
+  if (!(await requireRole(req, reply, ['admin']))) return;
+  const schema = z.object({
+    limit: z.coerce.number().max(200).optional(),
+    page: z.coerce.number().optional(),
+    action: z.string().max(64).optional(),
+    email: z.string().max(128).optional(),
+    from: z.string().optional(),
+    to: z.string().optional()
+  });
+  const params = schema.parse(req.query ?? {});
+  const result = await listAuditLogs({
+    limit: params.limit,
+    page: params.page,
+    action: params.action,
+    email: params.email,
+    from: params.from,
+    to: params.to
+  });
+  return result;
+});
 
 app.get('/auth/whoami', async (req, reply) => {
   const user = await getUserFromRequest(req);
