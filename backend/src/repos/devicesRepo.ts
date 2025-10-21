@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getSupabase } from '../db/supabase.js';
-import { decryptPII, encryptPII, maskPII } from '../util/crypto.js';
+import { decryptPII, encryptPII, hmacTokenHash, maskPII } from '../util/crypto.js';
+import { incrementDevicesRegistered } from '../metrics.js';
 
 type DeviceRow = {
   id: string;
@@ -9,7 +10,9 @@ type DeviceRow = {
   expo_token: string | null;
   expo_token_iv: string | null;
   expo_token_tag: string | null;
+  token_hash?: string | null;
   created_at?: string;
+  last_seen_at?: string | null;
 };
 
 function decryptToken(row: DeviceRow): string | null {
@@ -22,20 +25,48 @@ function decryptToken(row: DeviceRow): string | null {
 
 export async function registerDevice(classId: string, expoToken: string, userId?: string | null) {
   const sb = getSupabase();
+  const tokenHash = hmacTokenHash(expoToken);
+  const { data: existing, error: fetchError } = await sb
+    .from('devices')
+    .select('id,user_id,last_seen_at')
+    .eq('token_hash', tokenHash)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+
   const encrypted = encryptPII(expoToken);
-  const payload = {
+  const nowIso = new Date().toISOString();
+
+  if (existing) {
+    const updatePayload: Record<string, any> = {
+      class_id: classId,
+      expo_token: encrypted.ct,
+      expo_token_iv: encrypted.iv,
+      expo_token_tag: encrypted.tag,
+      last_seen_at: nowIso
+    };
+    if (userId && !existing.user_id) {
+      updatePayload.user_id = userId;
+    }
+    const { error: updateError } = await sb.from('devices').update(updatePayload).eq('id', existing.id);
+    if (updateError) throw updateError;
+    incrementDevicesRegistered();
+    return true;
+  }
+
+  const insertPayload = {
     id: randomUUID(),
     class_id: classId,
     user_id: userId ?? null,
     expo_token: encrypted.ct,
     expo_token_iv: encrypted.iv,
     expo_token_tag: encrypted.tag,
-    created_at: new Date().toISOString()
+    token_hash: tokenHash,
+    created_at: nowIso,
+    last_seen_at: nowIso
   };
-  const { error } = await sb.from('devices').upsert(payload, {
-    onConflict: 'expo_token'
-  });
-  if (error) throw error;
+  const { error: insertError } = await sb.from('devices').insert(insertPayload);
+  if (insertError) throw insertError;
+  incrementDevicesRegistered();
   return true;
 }
 

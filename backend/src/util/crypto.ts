@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 
 type EncryptedPayload = {
   ct: string;
@@ -18,6 +18,29 @@ function getKey(): Buffer {
     throw new Error('PII_ENC_KEY must decode to 32 bytes');
   }
   return key;
+}
+
+let hashFallbackWarned = false;
+
+function getHashKey(explicitKeyB64?: string): Buffer {
+  const keyB64 = explicitKeyB64 ?? process.env.PII_HASH_KEY ?? process.env.PII_ENC_KEY;
+  if (!keyB64) {
+    throw new Error('PII_HASH_KEY (or PII_ENC_KEY fallback) must be configured');
+  }
+  if (!explicitKeyB64 && !process.env.PII_HASH_KEY && process.env.PII_ENC_KEY && !hashFallbackWarned) {
+    console.warn('[privacy] PII_HASH_KEY missing, falling back to PII_ENC_KEY');
+    hashFallbackWarned = true;
+  }
+  const key = Buffer.from(keyB64, 'base64');
+  if (key.length !== 32) {
+    throw new Error('Token hash key must decode to 32 bytes');
+  }
+  return key;
+}
+
+export function hmacTokenHash(token: string, keyB64?: string): string {
+  const key = getHashKey(keyB64);
+  return createHmac('sha256', key).update(`expo:${token}`).digest('hex');
 }
 
 export function encryptPII(plain: string): EncryptedPayload {

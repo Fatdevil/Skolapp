@@ -11,6 +11,7 @@ Denna backend körs på Fastify och använder Supabase för persistens. Sessions
 - `INVITE_RATE_LIMIT_PER_IP` – maximalt antal `/auth/magic/initiate` per IP (per 10 min, default 10).
 - `VERIFY_RATE_LIMIT_PER_IP` – maximalt antal `/auth/magic/verify` per IP (per 10 min, default 20).
 - `PII_ENC_KEY` – 32 bytes base64-kodad nyckel för AES-256-GCM (se script nedan för att generera).
+- `PII_HASH_KEY` – 32 bytes base64-kodad nyckel för HMAC-SHA256 (måste vara separat från `PII_ENC_KEY`).
 - `PRIVACY_POLICY_VERSION` – version av aktuell privacy-policy (heltal, default `1`).
 - `RETENTION_DAYS_MESSAGES` – antal dagar meddelanden sparas innan de soft-deletas (default `365`).
 - `PRIVACY_EXPORT_RATE_PER_IP` – rate-limit per IP för `/privacy/export` (default `5`).
@@ -21,6 +22,8 @@ Generera en ny PII-nyckel med:
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
+
+> Generera **två** olika nycklar: en för `PII_ENC_KEY` och en för `PII_HASH_KEY`. Om `PII_HASH_KEY` saknas i runtime faller backend tillbaka på `PII_ENC_KEY`, men loggar en varning – konfigurera alltid en separat hash-nyckel i produktion.
 - `CORS_ORIGINS` – kommaseparerad lista över tillåtna origins.
 - `PILOT_RETURN_TOKEN` – sätt till `true` lokalt för att få tillbaka engångstoken från `/auth/magic/initiate`.
 

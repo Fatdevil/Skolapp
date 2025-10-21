@@ -20,6 +20,7 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `INVITE_RATE_LIMIT_PER_IP` | `10` |
 | `VERIFY_RATE_LIMIT_PER_IP` | `20` |
 | `PII_ENC_KEY` | 32 bytes base64 (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
+| `PII_HASH_KEY` | Separat 32 bytes base64 för HMAC (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) |
 | `PRIVACY_POLICY_VERSION` | `1` |
 | `RETENTION_DAYS_MESSAGES` | `365` |
 | `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
@@ -45,6 +46,7 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-konfiguration |
 | `INVITE_RATE_LIMIT_PER_IP` / `VERIFY_RATE_LIMIT_PER_IP` | Samma värden som i GitHub |
 | `PII_ENC_KEY` | Samma som GitHub secret |
+| `PII_HASH_KEY` | Separat HMAC-nyckel (samma som GitHub secret) |
 | `PRIVACY_POLICY_VERSION` | `1` |
 | `RETENTION_DAYS_MESSAGES` | `365` |
 | `PRIVACY_EXPORT_RATE_PER_IP` | `5` |
@@ -130,7 +132,38 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - Vid nyckelrotation: uppdatera `PII_ENC_KEY` i GitHub + Vercel, deploya backend och kör `npm run --workspace backend migrate:dev` om nya krypterade kolumner tillkommit. Befintliga tokens kan roteras genom att klienterna registrerar sig igen.
 - Sätt `RETENTION_DAYS_MESSAGES=0` i en temporär miljö för att validera att cron-jobbet soft-deletar gamla meddelanden.
 
-## 8. Observability
+## 8. Device index migration
+
+1. Kör backfill i dry-run för att verifiera skriptet:
+   ```
+   npm run --workspace backend backfill:device-hash -- --dry-run
+   ```
+2. Kör backfill på riktigt och följ loggarna efter fel:
+   ```
+   npm run --workspace backend backfill:device-hash
+   ```
+   - Skriptet loggar hur många rader som uppdaterades och exit-kodar ≠0 om något misslyckas.
+3. Deduplikera devices:
+   ```
+   npm run --workspace backend dedupe:devices -- --dry
+   ```
+   - Granska loggarna per batch och säkerställ att alla grupper räknas innan du går vidare.
+   - Justera sidstorlek med `DEDUP_PAGE_SIZE=<antal>` om Supabase begränsar svarsstorleken (default 1000 rader).
+   ```
+   npm run --workspace backend dedupe:devices -- --apply
+   ```
+   - `devices_deduplicated_total`-metrisken ökar med antalet rader som tas bort.
+4. Kör migrationen som lägger det unika indexet:
+   ```
+   npm run --workspace backend migrate:dev
+   ```
+5. Verifiera manuellt:
+   - Registrera samma Expo-token två gånger och kontrollera att endast en rad finns kvar i `devices`.
+   - Kontrollera att `last_seen_at` uppdateras och att `user_id` sätts när klienten loggar in.
+
+Rollback: Droppa indexet om något låser sig (`drop index if exists devices_token_hash_uidx;`) och återläs backup om data gått förlorad.
+
+## 9. Observability
 - Kontrollera att `METRICS_ENABLED=true` i miljön och att `curl https://api.pilot.skolapp.se/metrics` returnerar text med `http_request_duration_seconds`.
 - Efter ett `POST /auth/magic/initiate` ska `auth_magic_initiate_total` öka (se smoke-scriptet för referensflöde).
 - `/metrics/summary` kräver admin-cookie: verifiera p50/p95-latens och `requestsPerMinute`. Administratörerna använder samma endpoint i Observability-fliken.
@@ -139,7 +172,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 - API-loggar (JSON) finns i Vercel → Logs. Sök på `alert.triggered` för att se rate-limit/5xx hookar.
 - Viktiga signaler: spikar i 5xx (tröskel från `METRICS_5XX_ALERT_THRESHOLD`), rate-limit warnings (`Rate limit exceeded`), `cron_reminders_sent_total` som ökar enligt schema.
 
-## 9. Rollback
+## 10. Rollback
 1. Återställ env:
    - Sätt tillbaka tidigare GitHub/Vercel-secrets om fel värde deployats.
    - Rulla tillbaka till föregående Vercel release (`Deployments → Promote previous`).

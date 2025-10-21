@@ -8,7 +8,9 @@
     "build": "tsc -p .",
     "test": "vitest run",
     "migrate:dev": "ts-node --esm scripts/migrate.ts",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "backfill:device-hash": "tsx scripts/backfill-device-token-hash.ts",
+    "dedupe:devices": "tsx scripts/dedupe-devices.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.3.1",

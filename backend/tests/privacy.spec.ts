@@ -52,8 +52,6 @@ const mockedDevicesRepo = vi.mocked(devicesRepoModule);
 const mockedAudit = vi.mocked(auditModule);
 const mockedMetrics = vi.mocked(metricsModule);
 
-process.env.PII_ENC_KEY = Buffer.alloc(32, 1).toString('base64');
-
 describe('crypto helpers', () => {
   it('encrypts and decrypts PII roundtrip', () => {
     const cipher = encryptPII('secret-token');
