@@ -20,6 +20,11 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `INVITE_RATE_LIMIT_PER_IP` | `10` |
 | `VERIFY_RATE_LIMIT_PER_IP` | `20` |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-leverantör |
+| `METRICS_ENABLED` | `true` (aktivera `/metrics`) |
+| `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` |
+| `LOG_REDACT_FIELDS` | `body.password,body.token,headers.authorization` |
+| `METRICS_5XX_ALERT_THRESHOLD` | `5` |
+| `METRICS_RATELIMIT_ALERT_THRESHOLD` | `25` |
 
 ### Vercel Environment Variables (Production + Preview + Development)
 | Namn | Värde |
@@ -34,6 +39,9 @@ Den här runbooken beskriver hur piloten driftsätts end-to-end för dev/stage/p
 | `PILOT_RETURN_TOKEN` | `false` (endast `true` lokalt) |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP-konfiguration |
 | `INVITE_RATE_LIMIT_PER_IP` / `VERIFY_RATE_LIMIT_PER_IP` | Samma värden som i GitHub |
+| `METRICS_ENABLED` | `true` |
+| `METRICS_DEFAULT_BUCKETS` | `0.01,0.05,0.1,0.3,1,3` |
+| `LOG_REDACT_FIELDS` | `body.password,body.token,headers.authorization` |
 
 > Tips: Spegla värden via 1Password/Vault så att GitHub Actions och Vercel alltid ligger i synk.
 
@@ -89,9 +97,13 @@ done
 - Sista raden i loopen ska returnera `429` och logga rate-limit i backend-loggarna.
 
 ## 7. Observability
-- Supabase audit-loggar: `select * from audit_logs order by created_at desc limit 50;`
-- API-loggar: Vercel → Logs (Production/Preview) eller Supabase → Logs.
-- Viktiga signaler: 4xx/5xx-spikar, rate-limit warnings (`Rate limit exceeded`).
+- Kontrollera att `METRICS_ENABLED=true` i miljön och att `curl https://api.pilot.skolapp.se/metrics` returnerar text med `http_request_duration_seconds`.
+- Efter ett `POST /auth/magic/initiate` ska `auth_magic_initiate_total` öka (se smoke-scriptet för referensflöde).
+- `/metrics/summary` kräver admin-cookie: verifiera p50/p95-latens och `requestsPerMinute`. Administratörerna använder samma endpoint i Observability-fliken.
+- Admin UI → Observability: kontrollera att API-health och Cron-health laddas. Audit-fliken ska visa senaste händelserna med filtrering.
+- Supabase audit-loggar kan granskas direkt: `select * from audit_logs order by created_at desc limit 50;`
+- API-loggar (JSON) finns i Vercel → Logs. Sök på `alert.triggered` för att se rate-limit/5xx hookar.
+- Viktiga signaler: spikar i 5xx (tröskel från `METRICS_5XX_ALERT_THRESHOLD`), rate-limit warnings (`Rate limit exceeded`), `cron_reminders_sent_total` som ökar enligt schema.
 
 ## 8. Rollback
 1. Återställ env:

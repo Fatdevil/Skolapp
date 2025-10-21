@@ -27,6 +27,18 @@ function ensure(condition: unknown, message: string): void {
   }
 }
 
+function extractMetric(metrics: string, name: string): number {
+  const regex = new RegExp(`^${name}(?:\\{[^}]*\\})?\\s+(\\d+(?:\\.\\d+)?)`, 'm');
+  const match = metrics.match(regex);
+  return match ? Number(match[1]) : 0;
+}
+
+async function fetchMetrics(): Promise<string> {
+  const res = await fetch(`${baseUrl}/metrics`);
+  ensure(res.status === 200, `/metrics svarade ${res.status}`);
+  return res.text();
+}
+
 async function loadCookie(): Promise<string> {
   const content = await readFile(cookiePath, 'utf8');
   const cookie = content.trim();
@@ -58,6 +70,24 @@ const checks: Check[] = [
       ensure(limit, 'x-ratelimit-limit saknas');
       ensure(remaining, 'x-ratelimit-remaining saknas');
       ensure(reset, 'x-ratelimit-reset saknas');
+    }
+  },
+  {
+    name: 'Metrics counter increments for magic initiate',
+    run: async () => {
+      const beforeMetrics = await fetchMetrics();
+      const beforeValue = extractMetric(beforeMetrics, 'auth_magic_initiate_total');
+      await fetch(`${baseUrl}/auth/magic/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'smoke-metric@example.com', classCode: '3A' })
+      });
+      const afterMetrics = await fetchMetrics();
+      const afterValue = extractMetric(afterMetrics, 'auth_magic_initiate_total');
+      ensure(
+        afterValue === beforeValue + 1,
+        `auth_magic_initiate_total ökade inte (${beforeValue} -> ${afterValue})`
+      );
     }
   },
   {

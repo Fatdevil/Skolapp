@@ -8,6 +8,48 @@ export interface AuthenticatedUser {
   role: UserRole;
 }
 
+export interface MetricsSummary {
+  requestsPerMinute: number;
+  errorsPerMinute: number;
+  rateLimitPerMinute: number;
+  latencyMs: { p50: number | null; p95: number | null };
+  counters: {
+    rbacForbidden: number;
+    rateLimitHit: number;
+    cronRemindersSent: number;
+  };
+}
+
+export interface CronHealth {
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  sent24h: number;
+}
+
+export interface AuditLogItem {
+  id?: string;
+  action: string;
+  created_at: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  meta: Record<string, any> | null;
+}
+
+export interface AuditQuery {
+  limit?: number;
+  page?: number;
+  action?: string;
+  email?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface AuditResponse {
+  items: AuditLogItem[];
+  total: number;
+}
+
 export interface WhoAmIResponse {
   user: AuthenticatedUser;
 }
@@ -37,6 +79,22 @@ export async function whoami() {
 
 export async function logout() {
   return (await api.post('/auth/logout')).data as { ok: true };
+}
+
+export async function getHealth() {
+  return (await api.get('/health')).data;
+}
+
+export async function getSystemHealth() {
+  return (await api.get('/system/health')).data as Record<string, any>;
+}
+
+export async function getCronHealth() {
+  return (await api.get<CronHealth>('/reminders/health')).data;
+}
+
+export async function getMetricsSummary() {
+  return (await api.get<MetricsSummary>('/metrics/summary')).data;
 }
 
 export async function getEvents(classId: string) {
@@ -80,4 +138,8 @@ export async function promoteUser(payload: { email: string; role: UserRole }) {
 
 export async function sendTestPush(payload: { classId: string; title: string; body: string }) {
   return (await api.post('/admin/test-push', payload)).data;
+}
+
+export async function getAuditLogs(params: AuditQuery) {
+  return (await api.get<AuditResponse>('/admin/audit', { params })).data;
 }
