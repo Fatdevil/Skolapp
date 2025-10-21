@@ -17,7 +17,7 @@
     "@fastify/rate-limit": "^8.0.0",
     "@fastify/swagger": "^8.14.1",
     "@fastify/swagger-ui": "^1.10.2",
-    "@fastify/under-pressure": "^8.3.0",
+    "@fastify/under-pressure": "^8.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "axios": "^1.12.2",
     "dotenv": "^16.4.5",

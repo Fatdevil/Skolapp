@@ -26,6 +26,13 @@ export async function getUserByEmail(email: string) {
   return data;
 }
 
+export async function getUserById(id: string) {
+  const sb = getSupabase();
+  const { data, error } = await sb.from('users').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function updateUserRole(userId: string, role: Role) {
   const sb = getSupabase();
   const { data, error } = await sb.from('users').update({ role }).eq('id', userId).select('*').single();
@@ -41,4 +48,46 @@ export async function hasAdminUser() {
     .eq('role', 'admin');
   if (error) throw error;
   return (count ?? 0) > 0;
+}
+
+export async function updatePrivacyConsent(userId: string, version: number) {
+  const sb = getSupabase();
+  const now = new Date().toISOString();
+  const { data, error } = await sb
+    .from('users')
+    .update({ privacy_consent_version: version, privacy_consent_at: now })
+    .eq('id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function markEraseRequested(userId: string) {
+  const sb = getSupabase();
+  const now = new Date().toISOString();
+  const { data, error } = await sb
+    .from('users')
+    .update({ erase_requested_at: now })
+    .eq('id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function anonymiseUser(userId: string) {
+  const sb = getSupabase();
+  const surrogateEmail = `deleted-${userId}@erased.local`;
+  const { error } = await sb
+    .from('users')
+    .update({
+      email: surrogateEmail,
+      privacy_consent_at: null,
+      privacy_consent_version: null,
+      erase_requested_at: null,
+      deleted: true
+    })
+    .eq('id', userId);
+  if (error) throw error;
 }

@@ -7,6 +7,7 @@ import * as Device from 'expo-device';
 import { registerDevice } from './src/services/api';
 import LoginScreen from './src/screens/LoginScreen';
 import Tabs from './src/screens/Tabs';
+import PrivacyConsentScreen from './src/screens/PrivacyConsentScreen';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { ToastProvider } from './src/components/ToastProvider';
 
@@ -38,6 +39,12 @@ async function registerForPush() {
 function RootNavigator() {
   const { user, loading } = useAuth();
 
+  React.useEffect(() => {
+    if (user) {
+      registerForPush().catch(() => undefined);
+    }
+  }, [user]);
+
   if (loading) {
     return (
       <View style={styles.loading}>
@@ -49,20 +56,18 @@ function RootNavigator() {
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {user ? (
+      {!user ? (
+        <Stack.Screen name="Login" component={LoginScreen} />
+      ) : user.privacyConsentAt ? (
         <Stack.Screen name="Tabs" component={Tabs} />
       ) : (
-        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="PrivacyConsent" component={PrivacyConsentScreen} />
       )}
     </Stack.Navigator>
   );
 }
 
 export default function App() {
-  useEffect(() => {
-    registerForPush();
-  }, []);
-
   return (
     <ToastProvider>
       <AuthProvider>

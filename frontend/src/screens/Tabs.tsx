@@ -7,6 +7,7 @@ import AdminScreen from './admin/AdminScreen';
 import EventEditor from './events/EventEditor';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../components/ToastProvider';
+import SettingsScreen from './settings/SettingsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -49,6 +50,7 @@ export default function Tabs() {
       <Tab.Screen name="Kalender" component={CalendarScreen} />
       <Tab.Screen name="Chatt" component={ChatScreen} />
       <Tab.Screen name="Skapa" component={EventEditor} />
+      <Tab.Screen name="Inställningar" component={SettingsScreen} />
       {isStaff ? <Tab.Screen name="Admin" component={AdminScreen} /> : null}
     </Tab.Navigator>
   );
