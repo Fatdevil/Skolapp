@@ -49,8 +49,11 @@ API_BASE_URL="https://api.pilot.skolapp.se" \
   npx ts-node --esm backend/scripts/bootstrap-admin.ts --email rektorn@school.se
 ```
 - `ADMIN_BOOTSTRAP_TOKEN` måste vara satt i miljön.
+- Skriptet anropar först `GET /admin/status` och avslutar direkt (exit code 0) om en administratör redan finns.
 - Skriptet sparar cookie i `backend/.tmp/cookies.txt`.
-- Förväntad output: `Admin bootstrap klar för …` + JSON-respons från API:t.
+- Förväntad output vid första körningen: `Admin bootstrap klar för …` + JSON-respons från API:t.
+- Upprepade körningar returnerar `Admin already bootstrapped …` utan att orsaka fel i pipelinen.
+- Manuell statuskontroll: `curl https://api.pilot.skolapp.se/admin/status` → `{ "hasAdmin": true, "count": 1 }`.
 
 ## 4. Ladda upp CSV med roller
 - Använd mallen `backend/scripts/templates/invites.sample.csv` och fyll i riktiga adresser/klasskoder.

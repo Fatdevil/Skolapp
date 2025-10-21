@@ -1,9 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 import dotenv from 'dotenv';
-import { fetch } from 'undici';
+import axios from 'axios';
 
 dotenv.config();
 
@@ -20,7 +20,31 @@ function valueAfter(arg: string, prefix: string): string {
   return arg.slice(prefix.length);
 }
 
-async function main() {
+async function persistCookie(setCookie: string[] | string | undefined) {
+  const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  const sidCookie = cookies.find((cookie) => cookie.startsWith('sid='));
+  if (!sidCookie) {
+    throw new Error('Kunde inte hitta sid-cookie i svaret. Kontrollera server-loggarna.');
+  }
+  const sessionValue = sidCookie.split(';')[0];
+  const tmpDir = path.resolve(path.join(__dirname, '../../.tmp'));
+  await mkdir(tmpDir, { recursive: true });
+  const cookiePath = path.join(tmpDir, 'cookies.txt');
+  await writeFile(cookiePath, `${sessionValue}\n`, 'utf8');
+  return cookiePath;
+}
+
+function normaliseResponseBody(body: unknown): string {
+  if (body == null) return '';
+  if (typeof body === 'string') return body;
+  try {
+    return JSON.stringify(body);
+  } catch (error) {
+    return String(body);
+  }
+}
+
+export async function main(): Promise<number> {
   const email = getArg('email') ?? process.env.SMOKE_ADMIN_EMAIL ?? null;
   if (!email) {
     throw new Error('Ange e-post med --email=example@domain.se eller sätt SMOKE_ADMIN_EMAIL.');
@@ -33,40 +57,64 @@ async function main() {
     throw new Error('ADMIN_BOOTSTRAP_TOKEN saknas – kan inte bootstrapa administratör.');
   }
 
-  const response = await fetch(`${apiBaseUrl}/admin/bootstrap`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-bootstrap-token': bootstrapToken
-    },
-    body: JSON.stringify({ email, secret: bootstrapToken })
-  });
-
-  const bodyText = await response.text();
-  if (!response.ok) {
-    throw new Error(`Bootstrap misslyckades (${response.status}): ${bodyText || 'okänt fel'}`);
+  try {
+    const { data } = await axios.get<{ hasAdmin?: boolean }>(`${apiBaseUrl}/admin/status`, {
+      timeout: 10_000
+    });
+    if (data?.hasAdmin) {
+      console.log('Admin already bootstrapped; skipping.');
+      return 0;
+    }
+  } catch (error) {
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const reason = status ?? (error as Error).message;
+    console.warn('Status check failed, attempting bootstrap anyway…', reason);
   }
 
-  const setCookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
-  const sidCookie = setCookies.find((cookie) => cookie.startsWith('sid='));
-  if (!sidCookie) {
-    throw new Error('Kunde inte hitta sid-cookie i svaret. Kontrollera server-loggarna.');
+  const response = await axios.post(
+    `${apiBaseUrl}/admin/bootstrap`,
+    { email, secret: bootstrapToken },
+    {
+      timeout: 15_000,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-bootstrap-token': bootstrapToken
+      },
+      validateStatus: () => true
+    }
+  );
+
+  if (response.status === 409) {
+    console.log('Admin already bootstrapped (409); treating as success.');
+    return 0;
   }
 
-  const sessionValue = sidCookie.split(';')[0];
-  const tmpDir = path.resolve(path.join(__dirname, '../../.tmp'));
-  await mkdir(tmpDir, { recursive: true });
-  const cookiePath = path.join(tmpDir, 'cookies.txt');
-  await writeFile(cookiePath, `${sessionValue}\n`, 'utf8');
+  if (response.status < 200 || response.status >= 300) {
+    const body = normaliseResponseBody(response.data);
+    throw new Error(`Bootstrap misslyckades (${response.status}): ${body || 'okänt fel'}`);
+  }
 
-  process.stdout.write(`Admin bootstrap klar för ${email}.\n`);
-  process.stdout.write(`Cookie sparad till ${cookiePath}.\n`);
+  const cookiePath = await persistCookie(response.headers['set-cookie']);
+
+  console.log(`Admin bootstrap klar för ${email}.`);
+  console.log(`Cookie sparad till ${cookiePath}.`);
+  const bodyText = normaliseResponseBody(response.data);
   if (bodyText) {
-    process.stdout.write(`${bodyText}\n`);
+    console.log(bodyText);
   }
+
+  return 0;
 }
 
-main().catch((err) => {
-  process.stderr.write(`${String(err)}\n`);
-  process.exitCode = 1;
-});
+const entryUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+
+if (entryUrl && import.meta.url === entryUrl) {
+  main()
+    .then((code) => {
+      process.exit(code);
+    })
+    .catch((err) => {
+      process.stderr.write(`${String(err)}\n`);
+      process.exit(1);
+    });
+}
