@@ -12,6 +12,7 @@
     "typecheck": "echo \"(lägg till tsc --noEmit)\" && exit 0",
     "test": "npm run --workspace backend test -- && npm run frontend:test",
     "frontend:test": "npm test --prefix frontend",
+    "admin:promote": "ts-node --esm scripts/admin/promote-user.ts --email=... --role=...",
     "test:ui": "playwright test tests/ui-report.spec.ts",
     "prepare": "echo 'skipping playwright install (backend tests only)'",
     "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress && npm install --prefix frontend --no-fund --no-audit --no-progress"
@@ -22,6 +23,7 @@
     "@vitest/coverage-v8": "^3.2.4",
     "pptxgenjs": "^3.12.0",
     "typescript": "^5.5.4",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "ts-node": "^10.9.2"
   }
 }

@@ -16,6 +16,9 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
 ### Pilot-konfiguration (backend)
 - `SESSION_SECRET` – hemlig nyckel för att signera cookies (sätts till ett starkt värde i prod/test).
 - `SESSION_TTL_DAYS` – antal dagar en session är giltig innan ny inloggning krävs (default `30`).
+- `ADMIN_BOOTSTRAP_TOKEN` – används en gång för att skapa första admin via `/admin/bootstrap`.
+- `ADMIN_API_KEY` – behövs för server/CLI-uppgraderingar via `/admin/promote`.
+- `INVITE_RATE_LIMIT_PER_IP` & `VERIFY_RATE_LIMIT_PER_IP` – styr per-IP rate-limit för magic-link initiering/verifiering.
 - `CORS_ORIGINS` – kommaseparerad lista med tillåtna ursprung (standard: `http://localhost:19006,http://localhost:3000`).
 - `PILOT_RETURN_TOKEN` – sätt till `true` i lokal utveckling om du vill få tillbaka engångstoken i svaret från `/auth/magic/initiate`.
 - `GET /auth/whoami` – returnerar aktuell användare baserat på cookie (401 annars).
@@ -39,8 +42,8 @@ Detta paket är **redo att dras in i GitHub** (Upload files → Commit). Det lä
 ## Mappar
 - `.github/workflows/` – agenter (CI, Security, Triage, Release, UI Test)  
 - `agents/` – 15 agentmallar (för policy & rutiner)  
-- `tests/` – UI‑test som bygger PPTX‑rapport  
-- `scripts/` – `package_superzip.mjs`  
+- `tests/` – UI‑test som bygger PPTX‑rapport
+- `scripts/` – `package_superzip.mjs` och CLI (`scripts/admin/promote-user.ts`)
 - `docs/` – mallar (ADR, Feature Spec, Telemetry, GDPR, PR)
 
 > Ändra gärna `README.md` efter dina behov. Inga hemligheter ska checkas in – använd **GitHub Secrets**.

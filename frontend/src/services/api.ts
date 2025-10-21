@@ -74,6 +74,10 @@ export async function uploadInvites(csvText: string) {
   return (await api.post('/admin/invitations', { csvText })).data;
 }
 
+export async function promoteUser(payload: { email: string; role: UserRole }) {
+  return (await api.post('/admin/promote', payload)).data as { user: AuthenticatedUser };
+}
+
 export async function sendTestPush(payload: { classId: string; title: string; body: string }) {
   return (await api.post('/admin/test-push', payload)).data;
 }
