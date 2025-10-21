@@ -25,8 +25,11 @@ Alla cookies sätts med `HttpOnly`, `SameSite=Lax` och `Secure` (i produktion).
 ## Admin-bootstrap & rollhantering
 
 - `POST /admin/bootstrap` – får endast användas om databasen saknar administratör. Payloaden måste innehålla `secret` (eller `x-bootstrap-token`-header) som matchar `ADMIN_BOOTSTRAP_TOKEN`. Anropet skapar/uppgraderar användaren till `admin`, startar session och loggar audit-event `admin_bootstrap`.
+- `GET /admin/status` – returnerar `{ hasAdmin, count }` utan att kräva session. Används av CLI/CI för att kontrollera om en administratör redan finns.
 - `POST /admin/promote` – kräver antingen inloggad administratör eller `x-admin-api-key` som matchar `ADMIN_API_KEY`. Endpointen uppgraderar endast roller (guardian < teacher < admin) och loggar `promote_user` med metadata.
 - `POST /admin/invitations` – accepterar en valfri kolumn `role`. Ogiltiga värden (`guardian|teacher|admin`) ger `400`.
+
+CLI-skriptet `backend/scripts/bootstrap-admin.ts` använder `GET /admin/status` för att bli idempotent och kan köras säkert i varje pipeline utan att misslyckas när en administratör redan finns.
 
 ## Audit-loggar
 

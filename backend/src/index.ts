@@ -23,6 +23,7 @@ import { startReminderWorkerSupabase, getRemindersHealth } from './util/reminder
 import { moderate } from './util/moderation.js';
 import { audit } from './util/audit.js';
 import { maxRole } from './util/roles.js';
+import { getSupabase } from './db/supabase.js';
 
 const app = Fastify({ logger: true });
 
@@ -198,6 +199,20 @@ app.post(
   return { user: { id: user.id, email: user.email, role: user.role } };
 }
 );
+
+app.get('/admin/status', async (_req, reply) => {
+  const sb = getSupabase();
+  const { count, error } = await sb
+    .from('users')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'admin');
+  if (error) {
+    reply.log.error({ err: error }, 'Failed to load admin status');
+    return reply.code(500).send({ error: 'status_failed' });
+  }
+  const total = count ?? 0;
+  return { hasAdmin: total > 0, count: total };
+});
 
 app.post(
   '/admin/bootstrap',
