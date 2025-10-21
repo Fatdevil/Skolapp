@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { FastifyInstance } from 'fastify';
+import type {
+  FastifyInstance,
+  FastifyBaseLogger,
+  RawReplyDefaultExpression,
+  RawRequestDefaultExpression,
+  RawServerDefault
+} from 'fastify';
 import { z } from 'zod';
 import { getUserFromRequest, requireRole } from '../auth/session.js';
 import { audit } from '../util/audit.js';
@@ -34,7 +40,9 @@ type PrivacyRouteOptions = {
   eraseRateLimit: number;
 };
 
-export async function registerPrivacyRoutes(app: FastifyInstance, options: PrivacyRouteOptions) {
+type AnyFastify = FastifyInstance<any, any, any, any>;
+
+export async function registerPrivacyRoutes(app: AnyFastify, options: PrivacyRouteOptions) {
   app.get('/privacy/policy', async () => ({
     version: getPolicyVersion(),
     text: getPolicyText()
