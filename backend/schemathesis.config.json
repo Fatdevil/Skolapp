@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/schemathesis/schemathesis/master/src/schemathesis/schemas/config.schema.json",
+  "checks": ["all"],
+  "stateful": ["links"],
+  "maxExamples": 150,
+  "requestTimeout": 10000,
+  "workers": 4
+}

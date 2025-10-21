@@ -1,0 +1,155 @@
+name: Green Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build backend
+        run: npm run --workspace backend build
+
+      - name: Boot backend
+        run: |
+          npm exec --workspace backend -- tsx src/index.ts &
+          echo $! > backend.pid
+          npx --yes wait-on@7 tcp:3333
+
+      - name: Verify types
+        run: npm run verify:types
+
+      - name: Verify lint
+        run: npm run verify:lint
+
+      - name: Verify tests
+        run: npm run verify:tests
+
+      - name: Verify mutation
+        run: npm run verify:mutation
+
+      - name: Verify audits
+        run: npm run verify:audit
+
+      - name: API fuzzing
+        run: npm run verify:api-fuzz
+
+      - name: ZAP baseline
+        run: npm run verify:zap
+
+      - name: Performance budgets
+        run: npm run verify:perf
+
+      - name: Idempotent migrations
+        run: npm run verify:migrate
+
+      - name: License policy
+        run: npm run verify:licenses
+
+      - name: SBOM & Trivy
+        run: npm run verify:sbom
+
+      - name: Smoke tests
+        run: npm run verify:smoke
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f backend.pid ]; then
+            kill $(cat backend.pid) || true
+          fi
+
+      - name: Build gate summary
+        if: always()
+        run: node scripts/green-gate-summary.js
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            backend/coverage
+            frontend/coverage
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: backend/SBOM.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reports-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            reports
+            backend/reports
+            security/zap-baseline-report.json
+            security/zap-baseline-warn.md
+
+      - name: Comment summary
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const summaryPath = path.resolve('reports/green-gate-summary.md');
+            let body = 'Green Gate summary kunde inte läsas.';
+            if (fs.existsSync(summaryPath)) {
+              body = fs.readFileSync(summaryPath, 'utf8');
+            }
+            const header = ':vertical_traffic_light: **Green Gate** — Go/No-Go rapport\n\n';
+            const commentBody = header + body;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+            const existing = comments.find((comment) => comment.user?.type === 'Bot' && comment.body?.includes('Green Gate'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+            }

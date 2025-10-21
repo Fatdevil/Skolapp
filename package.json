@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "backend"
+    "backend",
+    "frontend"
   ],
   "scripts": {
     "build": "echo \"(lägg till build-kommandon)\"",
@@ -15,7 +16,20 @@
     "admin:promote": "ts-node --esm scripts/admin/promote-user.ts --email=... --role=...",
     "test:ui": "playwright test tests/ui-report.spec.ts",
     "prepare": "echo 'skipping playwright install (backend tests only)'",
-    "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress && npm install --prefix frontend --no-fund --no-audit --no-progress"
+    "postinstall": "npm install --prefix backend --no-fund --no-audit --no-progress && npm install --prefix frontend --no-fund --no-audit --no-progress",
+    "verify:types": "npm -w backend run typecheck && npm -w frontend run typecheck",
+    "verify:lint": "npm -w backend run lint && npm -w frontend run lint",
+    "verify:audit": "npm -w backend run osv && npm -w backend run npm-audit",
+    "verify:licenses": "node scripts/check-licenses.js",
+    "verify:tests": "npm -w backend run test:ci && npm -w frontend run test:ci",
+    "verify:mutation": "npm -w backend run mutation:ci",
+    "verify:api-fuzz": "npm -w backend run fuzz:schemathesis",
+    "verify:zap": "node scripts/zap-baseline.js",
+    "verify:perf": "npm -w backend run perf:autocannon",
+    "verify:migrate": "node scripts/migrate-idempotent.js",
+    "verify:sbom": "npm -w backend run sbom && npm -w backend run trivy",
+    "verify:smoke": "npm -w backend run smoke",
+    "verify:all": "npm run verify:types && npm run verify:lint && npm run verify:tests && npm run verify:mutation && npm run verify:audit && npm run verify:api-fuzz && npm run verify:zap && npm run verify:perf && npm run verify:migrate && npm run verify:licenses && npm run verify:sbom && npm run verify:smoke"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.2",

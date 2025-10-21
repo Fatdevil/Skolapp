@@ -1,6 +1,15 @@
 node_modules/
 backend/node_modules/
 frontend/node_modules/
+.stryker-tmp/
+backend/.stryker-tmp/
+backend/coverage/
+frontend/coverage/
+backend/reports/
+reports/
+security/zap-baseline-report.json
+security/zap-baseline-warn.md
+backend/SBOM.json
 .DS_Store
 .env
 backend/.env
