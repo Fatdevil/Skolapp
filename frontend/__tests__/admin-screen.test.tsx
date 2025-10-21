@@ -3,7 +3,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AdminScreen from '../src/screens/admin/AdminScreen';
 import * as AuthContext from '../src/auth/AuthContext';
 import * as ToastModule from '../src/components/ToastProvider';
-import { promoteUser, uploadInvites, type UserRole } from '../src/services/api';
+import { promoteUser, uploadInvites } from '../src/services/api';
 
 jest.mock('../src/auth/AuthContext', () => ({
   useAuth: jest.fn()
@@ -19,22 +19,20 @@ jest.mock('../src/services/api', () => {
   };
 });
 
-const mockUseAuth = AuthContext.useAuth as jest.MockedFunction<typeof AuthContext.useAuth>;
-const mockPromoteUser = promoteUser as jest.MockedFunction<typeof promoteUser>;
-const mockUploadInvites = uploadInvites as jest.MockedFunction<typeof uploadInvites>;
+const mockUseAuth = AuthContext.useAuth;
+const mockPromoteUser = promoteUser;
+const mockUploadInvites = uploadInvites;
 const mockToast = {
   show: jest.fn(),
   hide: jest.fn()
 };
-const useToastSpy = jest
-  .spyOn(ToastModule, 'useToast')
-  .mockReturnValue(mockToast as unknown as ReturnType<typeof ToastModule.useToast>);
+const useToastSpy = jest.spyOn(ToastModule, 'useToast').mockReturnValue(mockToast);
 
 function renderScreen() {
   return render(<AdminScreen />);
 }
 
-function buildAuthUser(role: UserRole) {
+function buildAuthUser(role) {
   return {
     user: { id: 'u1', email: 'admin@example.com', role },
     loading: false,
@@ -42,16 +40,8 @@ function buildAuthUser(role: UserRole) {
     initiate: jest.fn(),
     loginWithToken: jest.fn(),
     logout: jest.fn()
-  } as any;
+  };
 }
-
-beforeAll(() => {
-  jest.useFakeTimers();
-});
-
-afterAll(() => {
-  jest.useRealTimers();
-});
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -61,12 +51,12 @@ beforeEach(() => {
       ok: true,
       updated: true,
       user: { id: 'u2', email: 'teacher@example.com', role: 'admin' }
-    } as any;
+    };
   });
-  mockUploadInvites.mockResolvedValue({ ok: true, count: 3 } as any);
+  mockUploadInvites.mockResolvedValue({ ok: true, count: 3 });
   mockToast.show.mockReset();
   mockToast.hide.mockReset();
-  useToastSpy.mockReturnValue(mockToast as unknown as ReturnType<typeof ToastModule.useToast>);
+  useToastSpy.mockReturnValue(mockToast);
 });
 
 describe('AdminScreen', () => {
@@ -81,19 +71,14 @@ describe('AdminScreen', () => {
     });
     await act(async () => {
       fireEvent.press(screen.getByText('Uppgradera'));
-      jest.runAllTimers();
     });
 
     expect(mockPromoteUser).toHaveBeenCalledTimes(1);
     expect(mockPromoteUser).toHaveBeenCalledWith({ email: 'teacher@example.com', role: 'admin' });
 
-    const promoteCall = mockPromoteUser.mock.results[0];
-    expect(promoteCall?.value).toBeDefined();
-    await act(async () => {
-      await promoteCall!.value;
+    await waitFor(() => {
+      expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
     });
-
-    expect(mockToast.show).toHaveBeenCalledWith('teacher@example.com uppgraderades till admin');
   });
 
   test('teachers see warning and forbidden promote shows error toast', async () => {
