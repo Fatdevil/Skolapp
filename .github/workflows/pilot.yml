@@ -1,0 +1,61 @@
+name: Pilot Launch Kit
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  pilot:
+    name: Run migrations, tests & smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run migrations
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+        run: npm run migrate:dev
+
+      - name: Run backend tests
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+        run: npm test
+
+      - name: Bootstrap pilot admin session
+        working-directory: backend
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          ADMIN_BOOTSTRAP_TOKEN: ${{ secrets.ADMIN_BOOTSTRAP_TOKEN }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL }}
+        run: |
+          if [ -z "$SMOKE_ADMIN_EMAIL" ]; then
+            echo "SMOKE_ADMIN_EMAIL secret saknas" >&2
+            exit 1
+          fi
+          npx ts-node --esm scripts/bootstrap-admin.ts --email "$SMOKE_ADMIN_EMAIL"
+
+      - name: Smoke tests
+        working-directory: backend
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+        run: npm run smoke
