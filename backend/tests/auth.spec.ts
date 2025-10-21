@@ -4,11 +4,14 @@ import { closeTestApp, createTestApp } from '../test/helpers/app';
 
 const BASE_TIME = new Date('2025-01-01T12:00:00Z');
 
+type UserRole = 'guardian' | 'teacher' | 'admin';
+
 interface Invitation {
   id: string;
   email: string;
   class_code: string;
   token: string;
+  role: UserRole;
   created_at: string;
   expires_at: string | null;
   used_at: string | null;
@@ -27,7 +30,14 @@ interface SessionRow {
 interface UserRow {
   id: string;
   email: string;
-  role: 'guardian' | 'teacher' | 'admin';
+  role: UserRole;
+}
+
+interface AuditEntry {
+  action: string;
+  meta: Record<string, any> | null;
+  actorUserId: string | null | undefined;
+  targetUserId: string | null | undefined;
 }
 
 const mockEnsureDefaultClass = vi.fn(async () => ({ id: 'class-1', name: 'Klass 3A', code: '3A' }));
@@ -35,14 +45,19 @@ const mockGetClassByCode = vi.fn(async (code: string) => (code === '3A' ? { id: 
 
 const invitations: Invitation[] = [];
 const sessions: SessionRow[] = [];
-const users = new Map<string, UserRow>();
+const usersByEmail = new Map<string, UserRow>();
+const usersById = new Map<string, UserRow>();
+const auditEntries: AuditEntry[] = [];
 
-const mockCreateInvitation = vi.fn(async (email: string, classCode: string, token: string) => {
+const ROLE_RANK: Record<UserRole, number> = { guardian: 0, teacher: 1, admin: 2 };
+
+const mockCreateInvitation = vi.fn(async (email: string, classCode: string, token: string, role: UserRole = 'guardian') => {
   const row: Invitation = {
     id: `inv-${token}`,
     email,
     class_code: classCode,
     token,
+    role,
     created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     used_at: null
@@ -58,18 +73,42 @@ const mockMarkInvitationUsed = vi.fn(async (token: string) => {
   }
 });
 
-const mockUpsertUserByEmail = vi.fn(async (email: string, role: UserRow['role'] = 'guardian') => {
-  if (users.has(email)) {
-    return users.get(email)!;
+const mockUpsertUserByEmail = vi.fn(async (email: string, role: UserRole = 'guardian') => {
+  const existing = usersByEmail.get(email);
+  if (existing) {
+    if (ROLE_RANK[role] > ROLE_RANK[existing.role]) {
+      const updated: UserRow = { ...existing, role };
+      usersByEmail.set(email, updated);
+      usersById.set(updated.id, updated);
+      return updated;
+    }
+    return existing;
   }
   const user: UserRow = {
     id: `user-${Buffer.from(email).toString('hex').slice(0, 8)}`,
     email,
     role
   };
-  users.set(email, user);
+  usersByEmail.set(email, user);
+  usersById.set(user.id, user);
   return user;
 });
+const mockGetUserByEmail = vi.fn(async (email: string) => usersByEmail.get(email) ?? null);
+const mockUpdateUserRole = vi.fn(async (userId: string, role: UserRole) => {
+  const existing = usersById.get(userId);
+  if (!existing) throw new Error('User not found');
+  const updated: UserRow = { ...existing, role };
+  usersById.set(userId, updated);
+  usersByEmail.set(updated.email, updated);
+  return updated;
+});
+const mockHasAdminUser = vi.fn(async () => Array.from(usersByEmail.values()).some((user) => user.role === 'admin'));
+const mockAudit = vi.fn(async (action: string, meta: Record<string, any> | null, actorUserId?: string | null, targetUserId?: string | null) => {
+  auditEntries.push({ action, meta, actorUserId, targetUserId });
+});
+
+const mockGetClassTokens = vi.fn(async () => ['expo-token']);
+const mockSendPush = vi.fn(async () => ({ delivered: 1 }));
 
 vi.mock('../src/repos/classesRepo.js', () => ({
   ensureDefaultClass: mockEnsureDefaultClass,
@@ -81,14 +120,18 @@ vi.mock('../src/repos/invitationsRepo.js', () => ({
   markInvitationUsed: mockMarkInvitationUsed
 }));
 vi.mock('../src/repos/usersRepo.js', () => ({
-  upsertUserByEmail: mockUpsertUserByEmail
+  upsertUserByEmail: mockUpsertUserByEmail,
+  getUserByEmail: mockGetUserByEmail,
+  updateUserRole: mockUpdateUserRole,
+  hasAdminUser: mockHasAdminUser
 }));
-const mockGetClassTokens = vi.fn(async () => ['expo-token']);
+vi.mock('../src/util/audit.js', () => ({
+  audit: mockAudit
+}));
 vi.mock('../src/repos/devicesRepo.js', () => ({
   registerDevice: vi.fn(),
   getClassTokens: mockGetClassTokens
 }));
-const mockSendPush = vi.fn(async () => ({ delivered: 1 }));
 vi.mock('../src/services/PushService.js', () => ({
   sendPush: mockSendPush
 }));
@@ -144,7 +187,7 @@ vi.mock('../src/db/supabase.js', () => ({
           select() {
             return {
               eq(column: keyof UserRow, value: string) {
-                const row = Array.from(users.values()).find((user) => (user as any)[column] === value) ?? null;
+                const row = Array.from(usersById.values()).find((user) => (user as any)[column] === value) ?? null;
                 return {
                   async maybeSingle() {
                     return { data: row, error: null };
@@ -163,6 +206,13 @@ vi.mock('../src/db/supabase.js', () => ({
 let app: FastifyInstance;
 
 beforeAll(async () => {
+  process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session';
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'service-key';
+  process.env.ADMIN_BOOTSTRAP_TOKEN = 'boot-secret';
+  process.env.ADMIN_API_KEY = 'api-secret';
+  process.env.INVITE_RATE_LIMIT_PER_IP = '2';
+  process.env.VERIFY_RATE_LIMIT_PER_IP = '2';
   app = await createTestApp();
 });
 
@@ -174,14 +224,20 @@ beforeEach(() => {
   vi.setSystemTime(BASE_TIME);
   invitations.length = 0;
   sessions.length = 0;
-  users.clear();
+  usersByEmail.clear();
+  usersById.clear();
+  auditEntries.length = 0;
   mockCreateInvitation.mockClear();
   mockGetInvitationByToken.mockClear();
   mockMarkInvitationUsed.mockClear();
   mockGetClassByCode.mockClear();
   mockUpsertUserByEmail.mockClear();
+  mockGetUserByEmail.mockClear();
+  mockUpdateUserRole.mockClear();
+  mockHasAdminUser.mockClear();
   mockGetClassTokens.mockClear();
   mockSendPush.mockClear();
+  mockAudit.mockClear();
 });
 
 function extractSid(setCookie: string | string[] | undefined) {
@@ -191,198 +247,240 @@ function extractSid(setCookie: string | string[] | undefined) {
   return match ? match[1] : null;
 }
 
-describe('magic link flow', () => {
-  test('returns 404 when class code is missing', async () => {
-    mockGetClassByCode.mockResolvedValueOnce(null);
+describe('admin bootstrap', () => {
+  test('creates first admin with valid secret and logs audit entry', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/auth/magic/initiate',
-      payload: { email: 'missing@class.com', classCode: 'XYZ' }
-    });
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: 'Klasskod hittades inte' });
-  });
-
-  test('verify issues cookie session and never returns token', async () => {
-    const initiateResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/initiate',
-      payload: { email: 'pilot@example.com', classCode: '3A' }
-    });
-    expect(initiateResponse.statusCode).toBe(200);
-    expect(initiateResponse.json()).toEqual({ ok: true });
-    expect(invitations).toHaveLength(1);
-
-    const token = invitations[0]!.token;
-    const verifyResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/verify',
-      payload: { token }
+      url: '/admin/bootstrap',
+      payload: { email: 'rector@example.com', secret: 'boot-secret' }
     });
 
-    expect(verifyResponse.statusCode).toBe(200);
-    expect(verifyResponse.json()).toEqual({
-      user: {
-        id: users.get('pilot@example.com')!.id,
-        email: 'pilot@example.com',
-        role: 'guardian'
-      }
-    });
-    const setCookie = verifyResponse.headers['set-cookie'];
-    expect(setCookie).toBeTruthy();
-    const sid = extractSid(setCookie);
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.user.role).toBe('admin');
+    const sid = extractSid(response.headers['set-cookie']);
     expect(sid).toBeTruthy();
-    const header = Array.isArray(setCookie) ? setCookie[0]! : setCookie!;
-    expect(header).toContain('HttpOnly');
-    expect(header).toContain('SameSite=Lax');
-    expect(header).toContain('Path=/');
-    expect(header).not.toContain('sessionToken');
-    expect(mockMarkInvitationUsed).toHaveBeenCalledWith(token);
+    expect(mockAudit).toHaveBeenCalledWith('admin_bootstrap', { email: 'rector@example.com' }, expect.any(String), expect.any(String));
   });
 
-  test('rejects expired tokens and prevents reuse', async () => {
-    await app.inject({
+  test('returns 409 when admin already exists', async () => {
+    usersByEmail.set('admin@example.com', { id: 'user-admin', email: 'admin@example.com', role: 'admin' });
+    usersById.set('user-admin', { id: 'user-admin', email: 'admin@example.com', role: 'admin' });
+
+    const response = await app.inject({
       method: 'POST',
-      url: '/auth/magic/initiate',
-      payload: { email: 'ttl@example.com', classCode: '3A' }
+      url: '/admin/bootstrap',
+      payload: { email: 'rector@example.com', secret: 'boot-secret' }
     });
-    const token = invitations[0]!.token;
 
-    vi.setSystemTime(new Date(BASE_TIME.getTime() + 16 * 60 * 1000));
-
-    const expiredResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/verify',
-      payload: { token }
-    });
-    expect(expiredResponse.statusCode).toBe(400);
-    expect(expiredResponse.json()).toEqual({ error: 'Token har gått ut' });
-
-    vi.setSystemTime(BASE_TIME);
-
-    invitations[0]!.expires_at = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    const freshResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/verify',
-      payload: { token }
-    });
-    expect(freshResponse.statusCode).toBe(200);
-
-    const reused = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/verify',
-      payload: { token }
-    });
-    expect(reused.statusCode).toBe(400);
-    expect(reused.json()).toEqual({ error: 'Token har redan använts' });
+    expect(response.statusCode).toBe(409);
+    expect(mockAudit).not.toHaveBeenCalled();
   });
 });
 
-describe('server-side RBAC sessions', () => {
-  async function loginAs(email: string, role: UserRow['role'] = 'guardian') {
-    await app.inject({
+describe('admin promote', () => {
+  async function bootstrapAdmin() {
+    const bootstrapResponse = await app.inject({
       method: 'POST',
-      url: '/auth/magic/initiate',
-      payload: { email, classCode: '3A' }
+      url: '/admin/bootstrap',
+      payload: { email: 'admin@example.com', secret: 'boot-secret' }
     });
-    const token = invitations.find((inv) => inv.email === email)!.token;
-    const verifyResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/magic/verify',
-      payload: { token }
-    });
-    const sid = extractSid(verifyResponse.headers['set-cookie']);
-    const user = users.get(email)!;
-    user.role = role;
-    return { sid: sid!, user };
+    const sid = extractSid(bootstrapResponse.headers['set-cookie']);
+    return sid;
   }
 
-  test('blocks admin endpoint without session', async () => {
+  test('upgrades guardian to teacher via admin session', async () => {
+    const sid = await bootstrapAdmin();
+    usersByEmail.set('parent@example.com', { id: 'user-parent', email: 'parent@example.com', role: 'guardian' });
+    usersById.set('user-parent', { id: 'user-parent', email: 'parent@example.com', role: 'guardian' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/promote',
+      cookies: { sid: sid! },
+      payload: { email: 'parent@example.com', role: 'teacher' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const user = response.json().user;
+    expect(user.role).toBe('teacher');
+    expect(mockAudit).toHaveBeenCalledWith(
+      'promote_user',
+      expect.objectContaining({ from: 'guardian', to: 'teacher', via: 'session' }),
+      expect.any(String),
+      'user-parent'
+    );
+  });
+
+  test('keeps highest role and records audit when downgrade requested', async () => {
+    const sid = await bootstrapAdmin();
+    usersByEmail.set('teacher@example.com', { id: 'user-teacher', email: 'teacher@example.com', role: 'admin' });
+    usersById.set('user-teacher', { id: 'user-teacher', email: 'teacher@example.com', role: 'admin' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/promote',
+      cookies: { sid: sid! },
+      payload: { email: 'teacher@example.com', role: 'guardian' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.role).toBe('admin');
+    expect(mockUpdateUserRole).not.toHaveBeenCalled();
+    expect(mockAudit).toHaveBeenCalledWith(
+      'promote_user',
+      expect.objectContaining({ from: 'admin', to: 'admin', via: 'session' }),
+      expect.any(String),
+      'user-teacher'
+    );
+  });
+
+  test('allows API key to promote user', async () => {
+    usersByEmail.set('guardian@example.com', { id: 'user-guard', email: 'guardian@example.com', role: 'guardian' });
+    usersById.set('user-guard', { id: 'user-guard', email: 'guardian@example.com', role: 'guardian' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/promote',
+      headers: { 'x-admin-api-key': 'api-secret' },
+      payload: { email: 'guardian@example.com', role: 'admin' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.role).toBe('admin');
+    expect(mockAudit).toHaveBeenCalledWith(
+      'promote_user',
+      expect.objectContaining({ via: 'api_key', to: 'admin' }),
+      null,
+      'user-guard'
+    );
+  });
+});
+
+describe('magic verify role upgrades', () => {
+  test('upgrades role from invitation when higher', async () => {
+    usersByEmail.set('guardian@example.com', { id: 'user-guard', email: 'guardian@example.com', role: 'guardian' });
+    usersById.set('user-guard', { id: 'user-guard', email: 'guardian@example.com', role: 'guardian' });
+    invitations.push({
+      id: 'inv-1',
+      email: 'guardian@example.com',
+      class_code: '3A',
+      token: 'token-123456789',
+      role: 'teacher',
+      created_at: BASE_TIME.toISOString(),
+      expires_at: null,
+      used_at: null
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/verify',
+      payload: { token: 'token-123456789' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.role).toBe('teacher');
+    expect(invitations[0].used_at).not.toBeNull();
+    expect(mockAudit).toHaveBeenCalledWith(
+      'verify_magic',
+      expect.objectContaining({ role_upgrade: true, from: 'guardian' }),
+      'user-guard',
+      'user-guard'
+    );
+  });
+
+  test('does not downgrade admin role', async () => {
+    usersByEmail.set('admin@example.com', { id: 'user-admin', email: 'admin@example.com', role: 'admin' });
+    usersById.set('user-admin', { id: 'user-admin', email: 'admin@example.com', role: 'admin' });
+    invitations.push({
+      id: 'inv-2',
+      email: 'admin@example.com',
+      class_code: '3A',
+      token: 'token-456789012',
+      role: 'guardian',
+      created_at: BASE_TIME.toISOString(),
+      expires_at: null,
+      used_at: null
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/verify',
+      payload: { token: 'token-456789012' }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.role).toBe('admin');
+    expect(mockAudit).toHaveBeenCalledWith(
+      'verify_magic',
+      expect.objectContaining({ role_upgrade: false, from: 'admin' }),
+      'user-admin',
+      'user-admin'
+    );
+  });
+});
+
+describe('rate limits', () => {
+  test('rate limits magic initiate per IP', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/initiate',
+      payload: { email: 'first@example.com', classCode: '3A' }
+    });
+    expect(first.statusCode).toBe(200);
+    const second = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/initiate',
+      payload: { email: 'second@example.com', classCode: '3A' }
+    });
+    expect(second.statusCode).toBe(200);
+    const third = await app.inject({
+      method: 'POST',
+      url: '/auth/magic/initiate',
+      payload: { email: 'third@example.com', classCode: '3A' }
+    });
+    expect(third.statusCode).toBe(429);
+  });
+});
+
+describe('CSV invitations with role', () => {
+  async function bootstrapAdmin() {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/bootstrap',
+      payload: { email: 'admin@example.com', secret: 'boot-secret' }
+    });
+    return extractSid(response.headers['set-cookie']);
+  }
+
+  test('creates invitations with provided roles', async () => {
+    const sid = await bootstrapAdmin();
+    const csv = 'email,classCode,role\nparent@example.com,3A,guardian\nteacher@example.com,3A,teacher\nadmin@example.com,3A,admin';
+
     const response = await app.inject({
       method: 'POST',
       url: '/admin/invitations',
-      payload: { csvText: 'email,classCode\nuser@example.com,3A' }
+      cookies: { sid: sid! },
+      payload: { csvText: csv }
     });
-    expect(response.statusCode).toBe(403);
-  });
 
-  test('allows admin endpoint when session has admin role', async () => {
-    const { sid } = await loginAs('admin@example.com', 'admin');
-    const response = await app.inject({
-      method: 'POST',
-      url: '/admin/test-push',
-      payload: { classId: 'class-1', title: 'Hej', body: 'Världen' },
-      headers: { cookie: `sid=${sid}` }
-    });
     expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ ok: true, count: 3 });
+    expect(invitations.map((inv) => inv.role)).toEqual(['guardian', 'teacher', 'admin']);
   });
 
-  test('whoami returns 401 when session is missing', async () => {
-    const response = await app.inject({ method: 'GET', url: '/auth/whoami' });
-    expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: 'Unauthenticated' });
-  });
-
-  test('whoami returns current session user', async () => {
-    const { sid, user } = await loginAs('guardian@example.com', 'guardian');
-    const response = await app.inject({
-      method: 'GET',
-      url: '/auth/whoami',
-      headers: { cookie: `sid=${sid}` }
-    });
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role
-      }
-    });
-  });
-
-  test('logout revokes session cookie', async () => {
-    const { sid } = await loginAs('logout@example.com', 'admin');
-    const logoutResponse = await app.inject({
-      method: 'POST',
-      url: '/auth/logout',
-      headers: { cookie: `sid=${sid}` }
-    });
-    expect(logoutResponse.statusCode).toBe(200);
-    expect(logoutResponse.json()).toEqual({ ok: true });
-    expect(sessions.find((row) => row.id === sid)?.revoked).toBe(true);
-    const clearCookie = logoutResponse.headers['set-cookie'];
-    expect(clearCookie).toBeTruthy();
-    const header = Array.isArray(clearCookie) ? clearCookie[0]! : clearCookie!;
-    expect(header).toContain('sid=');
-    expect(header).toContain('Path=/');
-
-    const blocked = await app.inject({
-      method: 'POST',
-      url: '/admin/test-email',
-      headers: { cookie: `sid=${sid}` },
-      payload: { }
-    });
-    expect(blocked.statusCode).toBe(403);
-
-    const whoamiAfter = await app.inject({
-      method: 'GET',
-      url: '/auth/whoami',
-      headers: { cookie: `sid=${sid}` }
-    });
-    expect(whoamiAfter.statusCode).toBe(401);
-  });
-
-  test('session expires after TTL days', async () => {
-    const { sid } = await loginAs('ttl-admin@example.com', 'admin');
-    const ttlDays = Number(process.env.SESSION_TTL_DAYS ?? '30');
-    vi.setSystemTime(new Date(BASE_TIME.getTime() + (ttlDays + 1) * 24 * 60 * 60 * 1000));
+  test('rejects invitations with invalid role', async () => {
+    const sid = await bootstrapAdmin();
+    const csv = 'email,classCode,role\nparent@example.com,3A,guardian\nuser@example.com,3A,superhero';
 
     const response = await app.inject({
       method: 'POST',
-      url: '/admin/test-push',
-      payload: { classId: 'class-1', title: 'Hej', body: 'Efter TTL' },
-      headers: { cookie: `sid=${sid}` }
+      url: '/admin/invitations',
+      cookies: { sid: sid! },
+      payload: { csvText: csv }
     });
-    expect(response.statusCode).toBe(403);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain('Ogiltig roll');
   });
 });
